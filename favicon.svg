@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="13" fill="#181a15"/>
-  <path d="M47 19.5A20 20 0 1 0 50.5 42H34v-9h23v25h-8l-1-6A27 27 0 1 1 53 14z" fill="#d6b35c"/>
+  <title>GSF ChatGPT</title>
+  <rect x="1" y="1" width="62" height="62" rx="14" fill="#f4b73b" stroke="#946006" stroke-width="2"/>
+  <path d="M44 19a18 18 0 1 0 0 26" fill="none" stroke="#332611" stroke-width="10" stroke-linecap="round"/>
 </svg>
