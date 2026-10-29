@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GSF ChatGPT ランチャー</title>
+<style>
+  :root {
+    --bg: #14150f;
+    --panel: #1d1f18;
+    --line: #3a3c31;
+    --text: #eee9da;
+    --muted: #9a9888;
+    --gold: #e8c766;
+    --chip: #2a2c22;
+    --danger: #e0806b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+    line-height: 1.6;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 48px; }
+  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+  h1 { margin: 0 0 4px; font-size: 1.5rem; color: var(--gold); }
+  .lead { margin: 0; color: var(--muted); font-size: 0.85rem; }
+  button, select, input {
+    font: inherit;
+    color: var(--text);
+    background: var(--chip);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  button { padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: var(--gold); }
+  button.primary { background: var(--gold); color: #1a1a1a; border-color: var(--gold); font-weight: 700; }
+  button.danger { color: var(--danger); }
+  button.small { padding: 2px 8px; font-size: 0.8rem; }
+  select, input { padding: 6px 8px; min-width: 0; }
+  .panel {
+    margin-bottom: 12px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+  }
+  .panel-title { font-weight: 700; color: var(--gold); margin-bottom: 8px; font-size: 0.9rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  a.card {
+    display: block;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+    color: inherit;
+    text-decoration: none;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  a.card:hover, a.card:focus-visible { border-color: var(--gold); transform: translateY(-2px); outline: none; }
+  .name { font-size: 1.15rem; font-weight: 700; margin-bottom: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 2px 8px; border-radius: 999px; background: var(--chip); font-size: 0.75rem; white-space: nowrap; }
+  .chip.common-skill { color: var(--muted); }
+  .row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .row .skill-select { flex: 1; }
+  .name-input { width: 100%; margin-bottom: 10px; font-weight: 700; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .note { color: var(--muted); font-size: 0.8rem; margin: 8px 0 0; }
+  footer { margin-top: 32px; color: var(--muted); font-size: 0.75rem; }
+  footer a { color: var(--muted); }
+</style>
+<link rel="stylesheet" href="./light-theme.css">
+</head>
+<body class="theme-light">
+<main>
+  <header>
+    <div>
+      <h1>GSF ChatGPT ランチャー</h1>
+      <p class="lead" id="lead"></p>
+    </div>
+    <button id="toggle-edit"></button>
+  </header>
+  <div id="app"></div>
+  <footer>
+    スキルシミュ：<a href="https://mhwilds.wiki-db.com/sim/" target="_blank" rel="noopener">MH Wildsスキルシミュ(泣) / wiki-db.com</a>
+  </footer>
+</main>
+
+<script>
+  // 最初に入っているプリセット（このブラウザでまだ編集していないときに使われる）
+  const DEFAULT_SETTINGS = {
+    common: ["ひるみ軽減Lv1", "環境適応Lv1"],
+    presets: [
+      { name: "弓（体術5）", skills: ["体術Lv5", "スタミナ急速回復Lv3"] },
+      { name: "弓（体術3）", skills: ["体術Lv3", "スタミナ急速回復Lv3"] },
+      { name: "ガンランス", skills: ["ガード性能Lv3", "ガード強化Lv3", "砲術Lv3", "砲弾装填Lv2"] },
+    ],
+  };
+
+  // スキルシミュで選べるスキルと最大レベル
+  const SKILLS = Object.fromEntries(["環境利用の知識:3","体術:5","スタミナ急速回復:3","ランナー:3","腹減り耐性:3","威嚇:3","飛び込み:1","ジャンプ鉄人:1","クライマー:1","植生学:4","地質学:3","昆虫標本の達人:1","ハンター生活:1","体力回復量ＵＰ:3","早食い:3","広域化:5","整備:5","ボマー:3","キノコ大好き:3","アイテム使用強化:3","満足感:3","閃光強化:1","精霊の加護:3","回復速度:3","回避性能:5","回避距離ＵＰ:3","納刀術:3","ひるみ軽減:3","緩衝:1","毒耐性:3","麻痺耐性:3","睡眠耐性:3","防御力ＤＯＷＮ耐性:3","属性やられ耐性:3","気絶耐性:3","裂傷耐性:3","拘束耐性:3","爆破やられ耐性:3","悪臭耐性:2","環境適応:2","無我の境地:3","耳栓:3","風圧耐性:3","耐震:3","水場・油泥適応:2","防御:7","火耐性:3","水耐性:3","雷耐性:3","氷耐性:3","龍耐性:3","オトモへの采配:5","研鑽:1","属性変換:3","鎖刃刺撃:5","破壊王:3","災禍転福:3","属性吸収:3","逆恨み:5","巧撃:5","フルチャージ:5","逆襲:3","弱点特効:5","渾身:3","挑戦者:5","力の解放:5","火事場力:5","連撃:5","攻勢:5","急襲:3","攻撃:5","攻めの守勢:3","見切り:5","超会心:5","抜刀術【技】:3","火属性攻撃強化:3","水属性攻撃強化:3","氷属性攻撃強化:3","雷属性攻撃強化:3","龍属性攻撃強化:3","毒属性強化:3","麻痺属性強化:3","睡眠属性強化:3","爆破属性強化:3","会心撃【属性】:3","会心撃【特殊】:3","チャージマスター:3","匠:5","業物:3","剛刃研磨:3","心眼:3","鈍器使い:3","達人芸:1","通常弾・通常矢強化:1","貫通弾・竜の矢強化:1","散弾・剛射強化:1","弾導強化:3","速射強化:1","ファーストショット:3","フォースショット:3","特殊射撃強化:2","毒ビン追加:1","麻痺ビン追加:1","睡眠ビン追加:1","爆破ビン追加:1","減気ビン追加:1","集中:3","強化持続:3","抜刀術【力】:3","ＫＯ術:3","スタミナ奪取:3","砲術:3","高速変形:3","笛吹き名人:2","溜打強化:1","飛燕:1","毒ダメージ強化:1","ガード性能:3","ガード強化:3","砲弾装填:2","砥石使用高速化:2"].map((s) => { const [name, max] = s.split(":"); return [name, Number(max)]; }));
+  const SKILL_NAMES = Object.keys(SKILLS);
+
+  const SIM_URL = "https://mhwilds.wiki-db.com/sim/";
+  // シミュの他の条件（武器スロなし・結果200件など）はシミュの初期値のまま
+  const SIM_OPTIONS = "&s=1&e=1&v=10&g=13&w=&ws=&d=0&rf=-100&rw=-100&rt=-100&ri=-100&rd=-100&l=200";
+  const STORAGE_KEY = "mh-sim-launcher-chatgpt-v1";
+
+  // "体術Lv5" ⇔ { name: "体術", level: 5 }
+  const parseSkill = (s) => { const m = s.match(/^(.*)Lv(\d+)$/); return { name: m[1], level: Number(m[2]) }; };
+  const formatSkill = ({ name, level }) => `${name}Lv${level}`;
+
+  let settings = loadSettings();
+  let editing = false;
+
+  function loadSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (saved && Array.isArray(saved.common) && Array.isArray(saved.presets)) return saved;
+    } catch {}
+    return structuredClone(DEFAULT_SETTINGS);
+  }
+
+  function saveSettings() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch {}
+  }
+
+  const el = (tag, props = {}, ...children) => {
+    const node = Object.assign(document.createElement(tag), props);
+    node.append(...children);
+    return node;
+  };
+
+  const chip = (skill, extraClass = "") =>
+    el("span", { className: `chip ${extraClass}`.trim(), textContent: skill.replace(/Lv(\d+)$/, " $1") });
+
+  function render() {
+    document.getElementById("toggle-edit").textContent = editing ? "完了" : "編集";
+    document.getElementById("toggle-edit").className = editing ? "primary" : "";
+    document.getElementById("lead").textContent = editing
+      ? "スキルを変えると自動で保存されます。終わったら「完了」を押してください。"
+      : "武器を選ぶと、必須スキルが選ばれた状態でスキルシミュが新しいタブで開きます。";
+    const app = document.getElementById("app");
+    app.replaceChildren(...(editing ? renderEditor() : renderLauncher()));
+  }
+
+  function renderLauncher() {
+    const common = el("div", { className: "panel" },
+      el("div", { className: "panel-title", textContent: "全武器共通" }),
+      el("div", { className: "chips" }, ...settings.common.map((s) => chip(s))),
+    );
+    const grid = el("div", { className: "grid" }, ...settings.presets.map((preset) => {
+      const skills = [...preset.skills, ...settings.common];
+      return el("a", {
+        className: "card",
+        href: `${SIM_URL}#skills=${encodeURIComponent(skills.join(","))}${SIM_OPTIONS}`,
+        target: "_blank",
+        rel: "noopener",
+      },
+        el("div", { className: "name", textContent: preset.name || "（名前なし）" }),
+        el("div", { className: "chips" },
+          ...preset.skills.map((s) => chip(s)),
+          ...settings.common.map((s) => chip(s, "common-skill")),
+        ),
+      );
+    }));
+    return [common, grid];
+  }
+
+  // スキル一覧の編集欄（list は settings.common か preset.skills）
+  function skillListEditor(list) {
+    const rows = list.map((skill, i) => {
+      const { name, level } = parseSkill(skill);
+      const skillSelect = el("select", { className: "skill-select" },
+        ...SKILL_NAMES.map((n) => el("option", { value: n, textContent: n, selected: n === name })));
+      const levelSelect = el("select", {},
+        ...Array.from({ length: SKILLS[name] ?? level }, (_, k) =>
+          el("option", { value: k + 1, textContent: `Lv${k + 1}`, selected: k + 1 === level })));
+      skillSelect.onchange = () => {
+        const max = SKILLS[skillSelect.value];
+        list[i] = formatSkill({ name: skillSelect.value, level: Math.min(Number(levelSelect.value), max) });
+        saveSettings(); render();
+      };
+      levelSelect.onchange = () => {
+        list[i] = formatSkill({ name, level: Number(levelSelect.value) });
+        saveSettings();
+      };
+      const remove = el("button", { className: "small danger", textContent: "削除" });
+      remove.onclick = () => { list.splice(i, 1); saveSettings(); render(); };
+      return el("div", { className: "row" }, skillSelect, levelSelect, remove);
+    });
+    const add = el("button", { className: "small", textContent: "＋ スキルを追加" });
+    add.onclick = () => { list.push(`${SKILL_NAMES[0]}Lv1`); saveSettings(); render(); };
+    return [...rows, add];
+  }
+
+  function renderEditor() {
+    const common = el("div", { className: "panel" },
+      el("div", { className: "panel-title", textContent: "全武器共通" }),
+      ...skillListEditor(settings.common),
+    );
+
+    const presets = settings.presets.map((preset, i) => {
+      const nameInput = el("input", { className: "name-input", value: preset.name, placeholder: "ボタンの名前（例：弓）" });
+      nameInput.oninput = () => { preset.name = nameInput.value; saveSettings(); };
+
+      const up = el("button", { className: "small", textContent: "↑", disabled: i === 0, title: "上へ" });
+      up.onclick = () => { settings.presets.splice(i - 1, 0, ...settings.presets.splice(i, 1)); saveSettings(); render(); };
+      const down = el("button", { className: "small", textContent: "↓", disabled: i === settings.presets.length - 1, title: "下へ" });
+      down.onclick = () => { settings.presets.splice(i + 1, 0, ...settings.presets.splice(i, 1)); saveSettings(); render(); };
+      const remove = el("button", { className: "small danger", textContent: "このボタンを削除" });
+      remove.onclick = () => {
+        if (!confirm(`「${preset.name || "名前なし"}」を削除しますか？`)) return;
+        settings.presets.splice(i, 1); saveSettings(); render();
+      };
+
+      return el("div", { className: "panel" },
+        nameInput,
+        ...skillListEditor(preset.skills),
+        el("div", { className: "actions" }, up, down, remove),
+      );
+    });
+
+    const addPreset = el("button", { textContent: "＋ 武器のボタンを追加" });
+    addPreset.onclick = () => { settings.presets.push({ name: "", skills: [] }); saveSettings(); render(); };
+
+    const exportButton = el("button", { textContent: "設定をコピー" });
+    exportButton.onclick = async () => {
+      const code = JSON.stringify(settings);
+      try { await navigator.clipboard.writeText(code); alert("設定をコピーしました。別の端末で「設定を貼り付け」から読み込めます。"); }
+      catch { prompt("この文字を全部コピーしてください", code); }
+    };
+    const importButton = el("button", { textContent: "設定を貼り付け" });
+    importButton.onclick = () => {
+      const code = prompt("「設定をコピー」でコピーした文字を貼り付けてください");
+      if (!code) return;
+      try {
+        const parsed = JSON.parse(code);
+        if (!Array.isArray(parsed.common) || !Array.isArray(parsed.presets)) throw new Error();
+        settings = parsed; saveSettings(); render();
+      } catch { alert("読み込めませんでした。コピーした文字を全部貼り付けたか確認してください。"); }
+    };
+    const resetButton = el("button", { className: "danger", textContent: "最初の状態に戻す" });
+    resetButton.onclick = () => {
+      if (!confirm("編集した内容を消して、最初の状態に戻しますか？")) return;
+      settings = structuredClone(DEFAULT_SETTINGS); saveSettings(); render();
+    };
+
+    const tools = el("div", { className: "panel" },
+      el("div", { className: "panel-title", textContent: "その他" }),
+      el("div", { className: "actions" }, exportButton, importButton, resetButton),
+      el("p", { className: "note", textContent: "編集内容はこのブラウザの中にだけ保存されます。パソコンとスマホで同じにしたいときは、「設定をコピー」して、もう一方で「設定を貼り付け」してください。" }),
+    );
+
+    return [common, ...presets, el("div", { className: "actions" }, addPreset), el("div", { style: "height:12px" }), tools];
+  }
+
+  document.getElementById("toggle-edit").onclick = () => { editing = !editing; render(); };
+  render();
+</script>
+</body>
+</html>
