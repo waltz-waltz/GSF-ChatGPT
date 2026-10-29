@@ -1,0 +1,12 @@
+/*
+!/.gitignore
+!/*.js
+!/*.css
+!/*.html
+!/favicon.svg
+!/LICENSE
+!/README.md
+!/pkg/
+/pkg/*
+!/pkg/gogma_wasm_search.js
+!/pkg/gogma_wasm_search_bg.wasm
