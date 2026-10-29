@@ -14,7 +14,7 @@ export function mountCreationWorkbench(root,host) {
   if(!host.boosts.some(([id])=>id===form.boost))form.boost='攻撃激化';
   if(!['keep','reset'].includes(form.mode))form.mode='keep';
   let selected=prefs.selected??null;
-  let message=prefs.message??'', error='', working=false, external=false, renderId=0, lastFingerprint='';
+  let message=prefs.message??'', error='', working=false, external=false, renderId=0, lastFingerprint='', lastHintStamp='';
   const name=(items,id)=>items.find(([key])=>key===id)?.[1]??'未設定';
   const number=n=>isKnown(n)?n.toLocaleString('ja-JP'):'未特定';
   const label=(text,control)=>{const el=h('label');el.append(h('span',text),control);return el;};
@@ -86,7 +86,7 @@ export function mountCreationWorkbench(root,host) {
     if(unknown)message+=' '+unknown+'カウンターは未特定のままです。現在位置は特定タブで確認してください。';
   }
   function showExternal(){
-    root.replaceChildren(h('h2','通常アーティア作成'),h('p','別のタブでカウンターか手持ち武器が更新されました。古い予測で記録しないよう操作を止めています。画面を開き直してください。','error'));
+    root.replaceChildren(h('h2','通常アーティア作成'),h('p','別のタブでカウンター・手持ち武器・希望条件や表示順が更新されました。古い予測で記録しないよう操作を止めています。画面を開き直してください。','error'));
     const reload=h('button','最新のデータで開き直す','primary');reload.type='button';reload.onclick=()=>location.reload();root.append(reload);
   }
 
@@ -97,7 +97,7 @@ export function mountCreationWorkbench(root,host) {
     const source=sourceWeapon(model);
     if(selected&&!source){selected=null;changed();}
     if(bowgun(form.weaponType))form.attributeForce=0;
-    let normalPrediction=null, skillPrediction=null, keepPrediction=null, resetPrediction=null, predictionError='';
+    let normalPrediction=null, skillPrediction=null, keepPrediction=null, resetPrediction=null, predictionError='', upcoming=null;
     const currentNormal=normalCounter(model,form.weaponType);
     if(isKnown(save.baseSeed)&&isKnown(currentNormal)){
       try{normalPrediction=host.normal(save.baseSeed,form.weaponType,form.attributeForce,currentNormal);}catch(e){predictionError=e.message;}
@@ -118,8 +118,12 @@ export function mountCreationWorkbench(root,host) {
         }
       }catch(e){predictionError='自動予測を読み込めませんでした。実際の結果を選んで記録できます。'+e.message;}
     }
+    try {
+      const selectedTarget=source?{...source,attributeForce:attribute,categories:selected.kind==='normal'?source.ids.map(id=>CATEGORY_IDS.indexOf(id)):source.categories}:{weaponType:form.weaponType,attributeForce:form.attributeForce};
+      upcoming=await host.upcoming(model,selectedTarget);
+    } catch(e){predictionError+=' 次の希望ボーナスの確認ができませんでした。'+e.message;}
     if(revision!==renderId)return;
-    lastFingerprint=stateSignature(model);
+    lastFingerprint=stateSignature(model);lastHintStamp=basis.hintStamp;
     root.replaceChildren(h('p','CREATION WORKBENCH','step'),h('h2','通常アーティア作成'),
       h('p','ゲーム内で行った操作の直後に、対応するボタンを1回押してください。その場でカウンターと手持ち武器を更新します。予測と違う結果だった場合は、実際の結果に修正して記録できます。','prediction-intro'));
     if(message){const status=h('p',message,'continuation-message creation-action-message');status.setAttribute('role','status');root.append(status);}
@@ -130,6 +134,25 @@ export function mountCreationWorkbench(root,host) {
       const item=h('div');item.append(h('span',text),h('strong',number(value)));counters.append(item);
     }
     root.append(counters);
+    if(upcoming?.matches.length){
+      const notice=h('aside',undefined,'creation-upcoming-goals');notice.setAttribute('role','status');
+      notice.append(h('h3','★ 次の復元で、希望ボーナスに一致します'),
+        h('p','復元カウンター '+number(upcoming.counter)+' → '+number(upcoming.nextCounter)+' の1回です。別の武器で復元しても、この当たりを消費します。通常作成・巨戟化だけでは復元カウンターは進みません。'));
+      const list=h('div',undefined,'creation-upcoming-list');
+      for(const hit of upcoming.matches){
+        const entry=h('div',undefined,'creation-upcoming-item');
+        const preview=h('div',undefined,'creation-upcoming-bonuses');
+        for(const id of hit.bonuses){const tag=host.tag(hit.weaponType,id,false);tag.title=tag.textContent;tag.textContent=host.compactBonusName(hit.weaponType,id);tag.classList.add('compact');preview.append(tag);}
+        entry.append(h('strong',name(host.weapons,hit.weaponType)+'・'+name(host.attributes,hit.attributeForce)+(hit.label?' ｜ '+hit.label:'')),
+          h('span',hit.method==='keep'?'同じ構成で復元':'リセットして復元','creation-upcoming-method'),
+          h('small','希望：'+hit.wish),preview);
+        list.append(entry);
+      }
+      notice.append(list,button('07 復元ボーナス未来予測を確認',()=>host.open('bonus-future'),'secondary','open-upcoming-bonus'));
+      root.append(notice);
+    }else if(!upcoming){
+      root.append(h('p','次の希望ボーナスは未確認です。基準seed・復元カウンターが特定されると、07の希望に一致する次の1回をここでお知らせします。','pool-note'));
+    }
     let oldDraft=null;
     try{oldDraft=localStorage.getItem(OLD_DRAFT_KEY);}catch{}
     if(oldDraft){
@@ -206,6 +229,9 @@ export function mountCreationWorkbench(root,host) {
         const choose=button(text,()=>{form.mode=mode;changed();});choose.setAttribute('aria-pressed',String(form.mode===mode));
         card.classList.toggle('selected',form.mode===mode);
         card.append(choose,prediction?tags(type,prediction,false):h('p',attribute===null?'先に属性の種類を選んでください。':'予測に必要なカウンター・構成が未特定です。実際の結果を手入力できます。','pool-note'));
+        if(prediction&&host.goalMatch(type,prediction)){
+          card.classList.add('bonus-goal-hit');card.append(h('strong','★ 希望ボーナス一致','bonus-goal-badge'),h('p','希望：'+host.goalText(type),'pool-note'));
+        }
         modes.append(card);
       }
       const prediction=form.mode==='keep'?keepPrediction:resetPrediction;
@@ -215,6 +241,10 @@ export function mountCreationWorkbench(root,host) {
       restore.append(h('p','現在の復元カウンターから、次の1回の結果を表示しています。','pool-note'),modes,h('h4','記録する5枠（'+(form.mode==='keep'?'同じ構成':'リセット')+'）'),actual.box,
         h('p','復元カウンターだけを '+number(save.bonusCounter)+' → '+(isKnown(save.bonusCounter)?number(save.bonusCounter+1):'未特定のまま')+' に進め、この巨戟武器のボーナスを更新します。','pool-note'),record);
       if(selected.kind==='normal')restore.append(h('p','先に上の「巨戟化」を記録すると、復元強化を記録できます。','pool-note'));
+      if(upcoming?.matches.length&&(!prediction||!host.goalMatch(type,prediction))){
+        const warning=h('p','★ 別の武器・方法に希望の当たりがあります。この方法でゲーム内の復元を行うと、その当たりを消費します。上の通知で武器と方法を確認してください。','creation-advance-warning');
+        record.before(warning);
+      }
       root.append(restore);
     }
 
@@ -228,9 +258,10 @@ export function mountCreationWorkbench(root,host) {
       button('手持ち武器【巨戟】を見る',()=>host.open('owned'),'text-button'));
     root.append(footer);
   }
-  function refresh(){
+  function refresh(force=false){
     if(working)return;
-    if(stateSignature(host.read().model)!==lastFingerprint||!root.children.length)void render();
+    const current=host.read();
+    if(force===true||stateSignature(current.model)!==lastFingerprint||current.hintStamp!==lastHintStamp||!root.children.length)void render();
   }
   document.addEventListener('click',event=>{
     if(!root.contains(event.target)&&!root.closest('[data-tab-view]')?.hidden)requestAnimationFrame(refresh);

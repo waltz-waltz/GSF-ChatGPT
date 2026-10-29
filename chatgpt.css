@@ -62,3 +62,46 @@
 #creation-guide button { min-height:38px; padding:8px 14px; border-radius:8px; cursor:pointer; }
 #creation-guide .creation-operation-card > button.primary { min-height:46px; padding:10px 18px; font-weight:800; }
 #creation-guide button:disabled { cursor:default; opacity:.45; }
+
+/* 武器種ごとの見出しと、希望をすべて満たした結果。ボーナス自体の色は維持する。 */
+.comparison-table .match-half > .match-items { display:grid!important; grid-template-columns:minmax(0,1fr)!important; gap:16px; }
+.match-weapon-group { min-width:0; }
+.match-weapon-heading { display:flex; align-items:center; gap:12px; margin:0 0 9px!important; padding:7px 10px; border-left:5px solid #d9b45a; border-bottom:1px solid #726b4c; border-radius:4px; background:#343427; color:#fff3c6; font-size:1rem!important; line-height:1.4; }
+.match-weapon-heading small { font-size:.75rem; color:#cbc7ae; font-weight:400; }
+.match-weapon-items { display:flex; flex-wrap:wrap; gap:10px; align-items:stretch; }
+.comparison-table .match-weapon-items > .skill-match-item { flex:0 1 auto; max-width:100%; margin:0!important; padding:9px 11px!important; border:1px solid #5e776c!important; border-radius:9px; background:#20231b; }
+.comparison-table:not(.compact-columns) .match-weapon-items > .skill-match-item { flex:1 1 190px; }
+.comparison-table .match-weapon-items .skill-match-name { white-space:normal; }
+.comparison-table .match-half .skill-match-item.bonus-goal-hit,
+#creation-guide .creation-restore-card.bonus-goal-hit { border:3px solid #ffd45d!important; background:linear-gradient(120deg,#3f351b,#252519); box-shadow:0 0 0 2px #8e6b20,0 0 17px rgb(255 205 70 / 32%); }
+.bonus-goal-badge { display:inline-block; margin:5px 0 3px; padding:4px 8px; border:1px solid #ffe399; border-radius:6px; background:#f6ca58; color:#241c09; font-size:.76rem; font-weight:900; line-height:1.4; }
+.skill-match-name > .bonus-goal-badge,.bonus-goal-rule-note { display:table; }
+.bonus-goal-rule-note { margin-top:4px; color:#ffe6a5; font-size:.72rem; }
+.comparison-bonus-set > .bonus-goal-badge { grid-column:1 / -1; }
+.comparison-table td.bonus-goal-hit { box-shadow:inset 0 0 0 3px #ffd45d; }
+.next-match-table tr.bonus-goal-hit > td { background:rgb(255 210 90 / 8%); }
+.bonus-weapon-order { flex-basis:100%; width:100%; }
+.bonus-weapon-order > summary { cursor:pointer; padding:8px 0; color:#ffe39a; font-weight:800; }
+.bonus-weapon-order-list { display:grid; gap:8px; max-width:680px; margin:12px 0; }
+.bonus-weapon-order-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+.bonus-weapon-order-row > strong { flex:1 1 130px; color:var(--text); }
+.bonus-weapon-order-row button { min-height:34px; padding:5px 10px; }
+.bonus-weapon-order-row button:disabled { opacity:.35; cursor:default; }
+.comparison-table.gsf-highlight-off .match-half .skill-match-item.bonus-goal-hit { border:1px solid #5e776c!important; box-shadow:none!important; background:#20231b!important; }
+.gsf-highlight-off .bonus-goal-badge { border-color:var(--line); background:transparent; color:var(--text); }
+.gsf-highlight-off .bonus-goal-rule-note { color:var(--muted); }
+.gsf-highlight-off td.bonus-goal-hit,.gsf-highlight-off tr.bonus-goal-hit > td { box-shadow:none!important; background:transparent!important; }
+#creation-guide .creation-upcoming-goals { margin:20px 0; padding:20px; border:3px solid #ffd45d; border-radius:14px; background:linear-gradient(120deg,#40361d,#25251a); box-shadow:0 0 18px rgb(255 205 70 / 22%); }
+#creation-guide .creation-upcoming-goals h3 { margin:0 0 12px; color:#ffe391; }
+#creation-guide .creation-upcoming-goals > p { margin:0 0 15px; line-height:1.7; }
+#creation-guide .creation-upcoming-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px; margin-bottom:14px; }
+#creation-guide .creation-upcoming-item { min-width:0; padding:12px; border:1px solid #ad8d40; border-radius:9px; background:#202219; }
+#creation-guide .creation-upcoming-item > strong,#creation-guide .creation-upcoming-item > small { display:block; }
+#creation-guide .creation-upcoming-item > strong { color:#fff0bd; }
+#creation-guide .creation-upcoming-item > small { color:#e8dfbc; margin-top:6px; }
+#creation-guide .creation-upcoming-method { display:inline-block; margin-top:6px; padding:3px 7px; border:1px solid #e9c862; border-radius:5px; color:#ffe7a0; font-weight:800; font-size:.8rem; }
+#creation-guide .creation-upcoming-item .creation-bonus-tags .bonus-tag { min-width:0; font-size:.78rem; }
+#creation-guide .creation-upcoming-bonuses { display:flex; flex-wrap:wrap; gap:5px; margin-top:10px; }
+#creation-guide .creation-upcoming-bonuses .bonus-tag { min-width:0; margin:0; padding:4px 6px; font-size:.8rem; white-space:nowrap; }
+#creation-guide .creation-advance-warning { margin:16px 0; padding:14px; border:2px solid #ffd45d; border-radius:9px; background:#3a3019; color:#ffe9aa; font-weight:800; line-height:1.7; }
+@media(max-width:600px) { .match-weapon-items {display:grid;grid-template-columns:minmax(0,1fr);} .comparison-table .match-weapon-items > .skill-match-item {max-width:none;} #creation-guide .creation-upcoming-list {grid-template-columns:minmax(0,1fr);} .match-weapon-heading {font-size:.95rem!important;} }

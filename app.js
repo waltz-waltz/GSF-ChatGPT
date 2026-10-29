@@ -13,7 +13,7 @@ import {
   predictArtianBaseRolls,
 } from "./artian-base-rng.js";
 import { localizedTargetName, t } from "./i18n.js";
-import { mountCreationWorkbench } from "./creation-workbench.js?v=1";
+import { mountCreationWorkbench } from "./creation-workbench.js?v=bonus-headings-1";
 import { WORKBENCH_KEY, transition, stateSignature, writeAtomic } from "./creation-operations.js";
 import { setupResultToolbars } from "./result-toolbars.js";
 
@@ -1875,7 +1875,7 @@ function setActiveTab(tabName, updateHash = true) {
   if (updateHash && location.hash !== `#${validTab}`) history.replaceState(null, "", `#${validTab}`);
   // 狙い（04）の希望が変わっていることがあるので、開くたびに書き直す
   if (validTab === "artian-owned") renderArtianOwnedTab();
-  if (validTab === "artian-create") creationWorkbench?.refresh();
+  if (validTab === "artian-create") creationWorkbench?.refresh(true);
 }
 
 function syncRuntimeFromSaveState() {
@@ -3712,6 +3712,8 @@ function comparisonPredictionVisibility() {
 }
 
 function renderComparisonTable() {
+  renderBonusWeaponOrder();
+  comparisonRollSets = orderBonusTargets(comparisonRollSets);
   if (!selectedCandidate || comparisonRollSets.length === 0) {
     comparisonHeaderRow.replaceChildren();
     comparisonRows.replaceChildren();
@@ -3946,10 +3948,10 @@ function createComparisonRow(index) {
     items.className = "match-items";
     half.append(label, items);
     matchSplit.append(half);
-    return { half, items };
+    return { half, items, groups: new Map() };
   };
   const resetHalf = createMatchHalf("reset", "狙い（リセット）");
-  const ownedHalf = createMatchHalf("owned", "手持ちの強化（同じ構成）");
+  const ownedHalf = createMatchHalf("owned", "手持ち（同じ構成：手持ち条件／希望ボーナス）");
   matchCell.append(matchSplit);
   row.append(matchCell);
 
@@ -3957,23 +3959,35 @@ function createComparisonRow(index) {
   for (const target of comparisonRollSets) {
     const cell = document.createElement("td");
     const bonusSet = createCompactBonusSet(target, target.rolls[index]);
+    const goalMatch = configuredBonusWishMatches(target.weaponType, target.rolls[index]);
     if (rollMatchesBonusWish(target, target.rolls[index])) {
       cell.classList.add("bonus-wish-hit");
       const item = document.createElement("div");
       const name = document.createElement("div");
       item.className = "skill-match-item";
+      item.classList.toggle("bonus-goal-hit", goalMatch);
+      cell.classList.toggle("bonus-goal-hit", goalMatch);
       name.className = "skill-match-name";
       const kindBadge = document.createElement("span");
       kindBadge.className = `match-kind-badge ${target.kind === "owned" ? "owned" : "reset"}`;
-      kindBadge.textContent = target.kind === "owned" ? "手持ちの強化" : "狙い";
+      kindBadge.textContent = target.kind === "owned" ? (ownedRollMatches(target, target.rolls[index]) ? "手持ち条件一致" : "同じ構成") : "狙い";
       name.append(kindBadge, ...createWeaponBadge(target));
+      if (goalMatch) {
+        name.append(createBonusGoalBadge(target.weaponType));
+        if (target.kind === "owned" && !ownedRollMatches(target, target.rolls[index])) {
+          const note = document.createElement("small");
+          note.className = "bonus-goal-rule-note";
+          note.textContent = "希望に一致（手持ち条件には未一致）";
+          name.append(note);
+        }
+      }
       // 「一致」列だけで操作できるよう、採用ボタンもここに付ける
       const matchButton = target.kind === "owned"
         ? createAdoptOwnedUpdateButton(target, target.rolls[index], index + 1)
         : createAdoptAsOwnedButton(target, target.rolls[index], index + 1);
       matchButton.classList.add("match-adopt-button");
       item.append(name, createCompactBonusSet(target, target.rolls[index], true), matchButton);
-      (target.kind === "owned" ? ownedHalf : resetHalf).items.append(item);
+      appendWeaponMatchItem(target.kind === "owned" ? ownedHalf : resetHalf, target.weaponType, item);
     }
     if (!showAll) continue;
     if (target.kind === "owned") {
@@ -3982,6 +3996,7 @@ function createComparisonRow(index) {
     } else {
       bonusSet.append(createAdoptAsOwnedButton(target, target.rolls[index], index + 1));
     }
+    if (goalMatch) bonusSet.prepend(createBonusGoalBadge(target.weaponType));
     cell.classList.add("comparison-result-cell");
     cell.append(bonusSet);
     row.append(cell);
@@ -4183,13 +4198,13 @@ function wishSlotText(weaponType, slot) {
 // 狙い（リセット）は武器種ごとの希望、手持ち（同じ構成）は武器ごとのEX数
 function targetHasWish(target) {
   return target.kind === "owned"
-    ? (target.rule === "ex" ? target.minEx > 0 : ownedBonusesKnown(target))
+    ? (target.rule === "ex" ? target.minEx > 0 : ownedBonusesKnown(target)) || bonusWishActive(bonusWishFor(target.weaponType))
     : bonusWishActive(bonusWishFor(target.weaponType));
 }
 
 function targetWishText(target) {
   return target.kind === "owned"
-    ? `同じ構成で${ownedRuleText(target)}`
+    ? `同じ構成で${ownedRuleText(target)}${bonusWishActive(bonusWishFor(target.weaponType)) ? `、または希望：${bonusWishText(target.weaponType)}` : ""}`
     : `リセットで ${bonusWishText(target.weaponType)}`;
 }
 
@@ -4221,8 +4236,14 @@ function bonusWishBaseText(weaponType) {
 
 // リセット：系統の数（順不同・II/III/EXは区別しない）を満たすか。手持ち：EXの数が最低数以上か
 function rollMatchesBonusWish(target, bonusIds) {
-  if (target.kind === "owned") return ownedRollMatches(target, bonusIds);
-  const wish = bonusWishFor(target.weaponType);
+  if (target.kind === "owned" && ownedRollMatches(target, bonusIds)) return true;
+  return configuredBonusWishMatches(target.weaponType, bonusIds);
+}
+
+// 武器ごとの「今より強い」とは別に、設定した希望全体の一致だけを判定する。
+function configuredBonusWishMatches(weaponType, bonusIds) {
+  if (!Array.isArray(bonusIds) || bonusIds.length !== 5 || bonusIds.some((id) => ![6, 8, 9, 10, 11, 12, 13, 14, 15, 16].includes(id))) return false;
+  const wish = bonusWishFor(weaponType);
   if (attackExCount(bonusIds) < wish.minAttackEx) return false;
   const hasBase = wish.mode === "slots" ? activeWishSlots(wish).length > 0 : bonusWishTotal(wish) > 0;
   // 攻撃EXの最低数だけが決まっているときは、それだけで判定する
@@ -4233,6 +4254,107 @@ function rollMatchesBonusWish(target, bonusIds) {
   const counts = [0, 0, 0, 0];
   for (const bonusId of bonusIds) counts[bonusCategoryId(bonusId)] += 1;
   return wish.counts.every((need, category) => counts[category] >= need);
+}
+
+function normalizeBonusWeaponOrder(saved) {
+  const defaults = [11, 7, ...WEAPON_TYPES.map(([id]) => id).filter((id) => ![11, 7, 3].includes(id)), 3];
+  return [...new Set([...(Array.isArray(saved) ? saved : []), ...defaults])]
+    .filter((id) => Number.isInteger(id) && id >= 0 && id < WEAPON_TYPES.length);
+}
+
+function orderBonusTargets(targets) {
+  const ranks = new Map(loadBonusView().weaponOrder.map((id, rank) => [id, rank]));
+  return [...targets].sort((a, b) => ranks.get(a.weaponType) - ranks.get(b.weaponType));
+}
+
+function appendWeaponMatchItem(half, weaponType, item) {
+  let group = half.groups.get(weaponType);
+  if (!group) {
+    const section = document.createElement("section");
+    section.className = "match-weapon-group"; section.dataset.weaponType = String(weaponType);
+    const heading = document.createElement("h4"); heading.className = "match-weapon-heading";
+    heading.append(t(optionName(WEAPON_TYPES, weaponType)));
+    const count = document.createElement("small"); heading.append(count);
+    const items = document.createElement("div"); items.className = "match-weapon-items";
+    section.append(heading, items); half.items.append(section);
+    group = { items, count }; half.groups.set(weaponType, group);
+  }
+  group.items.append(item); group.count.textContent = `${group.items.childElementCount}件`;
+}
+
+function createBonusGoalBadge(weaponType) {
+  const badge = document.createElement("strong"); badge.className = "bonus-goal-badge";
+  badge.textContent = "★ 希望ボーナス一致"; badge.title = bonusWishText(weaponType);
+  return badge;
+}
+
+function renderBonusWeaponOrder() {
+  const details = document.querySelector("#bonus-weapon-order");
+  if (!details) return;
+  const active = new Set([...comparisonTargets, ...ownedWeapons].map((target) => target.weaponType));
+  const order = loadBonusView().weaponOrder;
+  const visible = order.filter((type) => active.has(type));
+  const list = document.createElement("div"); list.className = "bonus-weapon-order-list";
+  const save = (nextOrder, weaponType, control) => {
+    const view = loadBonusView(); view.weaponOrder = nextOrder; persistBonusView(view);
+    if (bonusWishSection) {
+      const rows = [...bonusWishSection.querySelectorAll(":scope > details[data-weapon-type]")];
+      rows.sort((a, b) => nextOrder.indexOf(Number(a.dataset.weaponType)) - nextOrder.indexOf(Number(b.dataset.weaponType)));
+      bonusWishSection.append(...rows);
+    }
+    renderComparisonTable();
+    const row = details.querySelector(`[data-order-weapon="${weaponType}"]`);
+    const next = row?.querySelector(`[data-move="${control}"]:not(:disabled)`) ?? row?.querySelector("strong");
+    next?.focus();
+  };
+  visible.forEach((type, index) => {
+    const row = document.createElement("div"); row.className = "bonus-weapon-order-row"; row.dataset.orderWeapon = String(type);
+    const name = document.createElement("strong"); name.textContent = t(optionName(WEAPON_TYPES, type)); name.tabIndex = -1;
+    row.append(name);
+    for (const [control, text, destination] of [["first", "先頭へ", 0], ["up", "↑", index - 1], ["down", "↓", index + 1], ["last", "末尾へ", visible.length - 1]]) {
+      const button = document.createElement("button"); button.type = "button"; button.className = "secondary small-button";
+      button.textContent = text; button.dataset.move = control;
+      button.setAttribute("aria-label", `${name.textContent}を${control === "up" ? "上へ" : control === "down" ? "下へ" : text}`);
+      button.disabled = destination < 0 || destination >= visible.length || destination === index;
+      button.addEventListener("click", () => {
+        const nextVisible = [...visible]; nextVisible.splice(index, 1); nextVisible.splice(destination, 0, type);
+        let nextIndex = 0; const nextOrder = order.map((id) => active.has(id) ? nextVisible[nextIndex++] : id);
+        save(nextOrder, type, control);
+      });
+      row.append(button);
+    }
+    list.append(row);
+  });
+  const hint = document.createElement("p"); hint.className = "pool-note";
+  hint.textContent = "一致欄を武器種の見出しでまとめます。上から順に表示し、このブラウザに保存します。初期順は弓・ガンランスが先頭、太刀が最後です。";
+  const reset = document.createElement("button"); reset.type = "button"; reset.className = "text-button"; reset.textContent = "初期順に戻す";
+  reset.addEventListener("click", () => save(normalizeBonusWeaponOrder(null), visible[0], "up"));
+  details.replaceChildren(Object.assign(document.createElement("summary"), { textContent: "武器種の見出し・並び順" }), hint, list, reset);
+}
+
+// 画面の予測範囲や古い比較表に依存せず、現在地点から次の1回を計算する。
+async function upcomingBonusWishMatches(model, selectedTarget) {
+  const { baseSeed: seed, bonusCounter: counter } = model.saveState;
+  if (!Number.isSafeInteger(seed) || !Number.isSafeInteger(counter) || counter < 0 || counter >= 4_294_967_295) return null;
+  await ensurePredictionWasm();
+  const resets = new Map();
+  for (const target of [...uniqueTargetsByCombination(), ...model.ownedWeapons, ...(selectedTarget ? [selectedTarget] : [])]) {
+    if (!Number.isInteger(target.attributeForce) || !bonusWishActive(bonusWishFor(target.weaponType))) continue;
+    resets.set(comparisonCombinationKey(target), target);
+  }
+  const matches = [];
+  for (const target of orderBonusTargets([...resets.values()])) {
+    const roll = Array.from(predict_gogma_rolls(seed, target.weaponType, target.attributeForce, counter, 35, 1));
+    if (configuredBonusWishMatches(target.weaponType, roll)) matches.push({ ...target, method: "reset", bonuses: roll, wish: bonusWishText(target.weaponType) });
+  }
+  const keeps = [...model.ownedWeapons];
+  if (selectedTarget?.categories && !keeps.some((weapon) => weapon.id === selectedTarget.id)) keeps.push(selectedTarget);
+  for (const target of orderBonusTargets(keeps)) {
+    if (!Number.isInteger(target.attributeForce) || !Array.isArray(target.categories) || target.categories.length !== 5 || !target.categories.every((c) => Number.isInteger(c) && c >= 0 && c <= 3) || !bonusWishActive(bonusWishFor(target.weaponType))) continue;
+    const roll = Array.from(predict_gogma_keep_rolls(seed, target.weaponType, target.attributeForce, counter, 35, 1, new Uint8Array(target.categories)));
+    if (configuredBonusWishMatches(target.weaponType, roll)) matches.push({ ...target, method: "keep", bonuses: roll, wish: bonusWishText(target.weaponType) });
+  }
+  return { counter, nextCounter: counter + 1, matches };
 }
 
 // 開け閉めする欄の共通処理：初期は閉じる・開閉を覚える・「クリックで開きます」の案内を付ける
@@ -4281,6 +4403,7 @@ function loadBonusView() {
     subtypeHistory: saved.subtypeHistory && typeof saved.subtypeHistory === "object" ? saved.subtypeHistory : {},
     // 手持ち武器の一覧の並べ方：manual＝登録した順（↑↓で並び替え）、type＝武器種ごと
     ownedSort: saved.ownedSort === "type" ? "type" : "manual",
+    weaponOrder: normalizeBonusWeaponOrder(saved.weaponOrder),
   };
 }
 function persistBonusView(view) {
@@ -4332,7 +4455,7 @@ function setupComparisonFrames() {
   else step1.append(ownedWeaponSection);
 
   const step2 = createStep("2", "希望ボーナスを決める（狙い）",
-    "狙いの武器種ごとに、リセットで欲しいボーナスを決めます（系統の数か、5枠を1つずつ）。手持ち武器の条件は、①の「手持ち武器」の欄で武器ごとに決めます。");
+    "武器種ごとに希望ボーナスを決めます（系統の数か、5枠を1つずつ）。リセット・同じ構成どちらも、希望をすべて満たす結果は金枠で強調します。手持ち条件だけに一致する結果は青緑で区別します。");
   step2.append(bonusWishSection);
 
   const step3 = createStep("3", "結果を見る",
@@ -4451,6 +4574,8 @@ function setupComparisonTableOptions() {
   countHint.className = "comparison-table-options-hint";
   countHint.textContent = "「表示する回数」は、何回先まで予測するかです（上の「次の一致」にも使われます）。";
   bar.append(countHint);
+  const weaponOrder = document.createElement("details"); weaponOrder.id = "bonus-weapon-order"; weaponOrder.className = "bonus-weapon-order";
+  bar.append(weaponOrder);
   comparisonTableWrap.before(bar);
   setupTableScrollMirrors();
 }
@@ -4478,7 +4603,7 @@ function renderBonusWishSection() {
   renderOwnedWeaponSection();
 
   const weaponTypes = [...new Set(comparisonTargets.map((target) => target.weaponType))]
-    .sort((a, b) => a - b);
+    .sort((a, b) => loadBonusView().weaponOrder.indexOf(a) - loadBonusView().weaponOrder.indexOf(b));
 
   const intro = document.createElement("div");
   intro.className = "skill-filter-intro";
@@ -4486,6 +4611,7 @@ function renderBonusWishSection() {
   title.textContent = "狙い（リセットして再復元）の希望ボーナス";
   const description = document.createElement("p");
   description.textContent = "上で登録した武器種ごとに、リセットで欲しいボーナスを決めます（系統の数か、5枠を1つずつ。どちらも順不同）。当たりは表の「一致」列に出ます。設定はこのブラウザに保存されます。";
+  description.textContent += "手持ちの同じ構成の結果も、この希望をすべて満たすと金枠の「希望ボーナス一致」で表示します。手持ち条件だけの一致とは区別できます。";
   intro.append(title, description);
 
   if (weaponTypes.length === 0) {
@@ -4499,6 +4625,7 @@ function renderBonusWishSection() {
   const rows = weaponTypes.map((weaponType) => {
     const row = document.createElement("details");
     row.className = "weapon-filter-row";
+    row.dataset.weaponType = String(weaponType);
 
     const summary = document.createElement("summary");
     const name = document.createElement("span");
@@ -4766,6 +4893,9 @@ function renderBonusWishSummary() {
         cell("next-note", others > 0 ? `同じ回にほか${others}武器も一致` : ""),
         cell("next-action", adoptButton),
       );
+      if (configuredBonusWishMatches(target.weaponType, target.rolls[hits[0]])) {
+        row.classList.add("bonus-goal-hit"); row.querySelector(".next-wish")?.append(createBonusGoalBadge(target.weaponType));
+      }
     }
     body.append(row);
   }
@@ -8164,6 +8294,7 @@ function workbenchRead() {
   return {
     model: JSON.parse(JSON.stringify({ saveState, artianBaseState, normalOwned: artianOwned, ownedWeapons })),
     stamp: JSON.stringify([STORAGE_KEY, ARTIAN_OWNED_KEY, OWNED_WEAPONS_KEY].map(key => [key, localStorage.getItem(key)])),
+    hintStamp: JSON.stringify([bonusWishes, comparisonTargets, loadBonusView().weaponOrder]),
   };
 }
 function workbenchPreferences() {
@@ -8204,17 +8335,21 @@ async function commitWorkbench(action, expected, settings) {
 
 creationWorkbench = mountCreationWorkbench(document.querySelector('#creation-guide'), {
   read:workbenchRead, preferences:workbenchPreferences, savePreferences:saveWorkbenchPreferences, commit:commitWorkbench,
-  watchedKeys:[STORAGE_KEY,ARTIAN_OWNED_KEY,OWNED_WEAPONS_KEY],
+  watchedKeys:[STORAGE_KEY,ARTIAN_OWNED_KEY,OWNED_WEAPONS_KEY,BONUS_WISHES_KEY,BONUS_VIEW_KEY],
   weapons:WEAPON_TYPES, attributes:ATTRIBUTES, boosts:OWNED_BOOST_OPTIONS.filter(([id])=>id),
   series:SERIES_SKILLS, groups:GROUP_SKILLS,
   createId:createTargetId, open:setActiveTab, pool:artianBasePool,
   normal:(seed,type,attr,counter)=>predictArtianBaseRolls(seed,type,ARTIAN_R8_ENUM,BOWGUN_WEAPON_TYPES.has(type)?0:attr,counter,1)[0].bonusIds,
   ready:ensurePredictionWasm,
+  upcoming:upcomingBonusWishMatches,
+  goalMatch:configuredBonusWishMatches,
+  goalText:bonusWishText,
   skill:(seed,type,attr,counter)=>{const index=predict_skill_rolls(seed,type,attr,counter,SKILL_COUNTER_GATE,1)[0]; return {seriesIndex:Math.floor(index/GROUP_SKILLS.length),groupIndex:index%GROUP_SKILLS.length};},
   bonus:(seed,type,attr,counter,mode,categories)=>Array.from(mode==='keep'
     ?predict_gogma_keep_rolls(seed,type,attr,counter,35,1,new Uint8Array(categories))
     :predict_gogma_rolls(seed,type,attr,counter,35,1)),
   normalName:artianBaseBonusName, bonusName:gogmaBonusName, bonusOptions:gogmaBonusesForWeapon,
+  compactBonusName:compactGogmaBonusName,
   subtype:(type,boost)=>OWNED_SUBTYPE_BY_BOOST[type]?.[boost]??'',
   autoLabel:(type,attr,boost)=>[boost?'【'+boost+'】':'',OWNED_SUBTYPE_BY_BOOST[type]?.[boost]??'',optionName(ATTRIBUTES,attr)].filter(Boolean).join(' ').slice(0,24),
   tag:(type,id,normal)=>{const tag=document.createElement('span');tag.className='bonus-tag '+(normal?artianBaseBonusClassName(id):bonusClassName(id))+(!normal&&EX_BONUS_IDS.has(id)?' ex':'');tag.textContent=normal?artianBaseBonusName(type,id):gogmaBonusName(type,id);return tag;},
