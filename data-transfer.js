@@ -12,7 +12,8 @@ export const KEY_MAP = [
 KEY_MAP.push({ source: 'mh-sim-launcher-v1', target: 'mh-sim-launcher-chatgpt-v1', label: 'シミュランチャーの設定', type: 'object' });
 export const BACKUP_KEY = 'gsf-chatgpt-before-claude-transfer-v1';
 export const DRAFT_KEY = 'gsf-chatgpt-creation-draft-v1';
-const TARGET_KEYS = [...KEY_MAP.map((entry) => entry.target), DRAFT_KEY];
+export const WORKBENCH_KEY = 'gsf-chatgpt-creation-workbench-v1';
+const TARGET_KEYS = [...KEY_MAP.map((entry) => entry.target), DRAFT_KEY, WORKBENCH_KEY];
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const validNumber = (value, max) => value === undefined || value === null ||
   ((typeof value === 'number' || typeof value === 'string' && /^\d+$/.test(value)) && Number.isSafeInteger(Number(value)) && Number(value) >= 0 && Number(value) <= max);
@@ -50,6 +51,7 @@ export function readLegacy(storage) {
     const raw = storage.getItem(entry.source); validateValue(entry, raw); return [entry.target, raw];
   }));
   snapshot[DRAFT_KEY] = null;
+  snapshot[WORKBENCH_KEY] = null;
   return snapshot;
 }
 export function readCurrent(storage) {
@@ -83,8 +85,8 @@ export function readBackup(storage) {
   let backup;
   try { backup = JSON.parse(raw); } catch { throw new Error('引き継ぎ前の控えを読み取れませんでした。'); }
   if (backup.format !== 'gsf-transfer-backup' || backup.version !== 1 || !isObject(backup.data) ||
-      TARGET_KEYS.some((key) => backup.data[key] !== null && typeof backup.data[key] !== 'string')) throw new Error('引き継ぎ前の控えの形式が異なります。');
-  return { ...backup, data: Object.fromEntries(TARGET_KEYS.map((key) => [key, backup.data[key]])) };
+      TARGET_KEYS.some((key) => !(key === WORKBENCH_KEY && backup.data[key] === undefined) && backup.data[key] !== null && typeof backup.data[key] !== 'string')) throw new Error('引き継ぎ前の控えの形式が異なります。');
+  return { ...backup, data: Object.fromEntries(TARGET_KEYS.map((key) => [key, backup.data[key] ?? null])) };
 }
 const snapshotsEqual = (a, b) => TARGET_KEYS.every((key) => a[key] === b[key]);
 const writeSnapshot = (storage, data) => {

@@ -27,3 +27,38 @@
 .creation-guide .status-pill { display:inline-block; margin:14px 0; }
 .app-tabs { overflow-x:auto; }
 @media (max-width:800px) { .result-toolbar { align-items:stretch; gap:14px; } .result-toolbar .checkbox-label { width:100%; } }
+
+/* Creation workbench: scoped to tab 05; keep the established palette. */
+#creation-guide .creation-operation-card { margin-top:20px; padding:20px; border:1px solid var(--line); border-radius:14px; background:var(--surface-raised); }
+#creation-guide .creation-operation-card h3 { margin:0 0 14px; }
+#creation-guide .creation-operation-card h4 { margin:18px 0 10px; }
+#creation-guide .creation-toolbar { display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; }
+#creation-guide .creation-toolbar > label { display:grid; flex:1 1 190px; gap:7px; }
+#creation-guide .creation-toolbar > .primary { flex:0 0 110px; min-height:48px; }
+#creation-guide .creation-toolbar :is(select,input) { width:100%; }
+#creation-guide .creation-counter-strip { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:20px 0; }
+#creation-guide .creation-counter-strip > div { padding:14px; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
+#creation-guide .creation-counter-strip span { display:block; font-size:.78rem; color:var(--muted); }
+#creation-guide .creation-counter-strip strong { display:block; margin-top:8px; font-size:1.25rem; color:var(--gold-bright); }
+#creation-guide .creation-bonus-tags { display:flex; flex-wrap:wrap; gap:7px; margin:10px 0; }
+#creation-guide .creation-bonus-tags .bonus-tag { display:inline-block; min-width:110px; }
+#creation-guide .creation-result-editor { margin:12px 0; }
+#creation-guide .creation-result-editor details { padding:10px 0; border-top:1px solid var(--line); }
+#creation-guide .creation-result-editor summary { cursor:pointer; color:var(--muted); font-size:.82rem; }
+#creation-guide .creation-result-editor .creation-fields { grid-template-columns:repeat(5,minmax(125px,1fr)); }
+#creation-guide .creation-skill-pair { padding:12px; border:1px solid var(--line); border-radius:9px; color:var(--gold-bright); font-weight:700; }
+#creation-guide .creation-boosts { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }
+#creation-guide button[aria-pressed="true"] { border:2px solid var(--gold); background:rgb(214 179 92 / 16%); font-weight:800; }
+#creation-guide .creation-restore-modes { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+#creation-guide .creation-restore-card { padding:14px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
+#creation-guide .creation-restore-card.selected { border:2px solid var(--gold); }
+#creation-guide .creation-restore-card > button { width:100%; }
+#creation-guide .creation-current-weapon { font-weight:800; color:var(--gold-bright); }
+#creation-guide .creation-workbench-footer { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-top:24px; }
+#creation-guide .creation-workbench-footer > p { flex-basis:100%; margin:0; }
+#creation-guide .creation-action-message { padding:14px; border:1px solid var(--green); border-radius:10px; }
+@media(max-width:800px) { #creation-guide .creation-counter-strip,#creation-guide .creation-restore-modes {grid-template-columns:1fr;} #creation-guide .creation-result-editor .creation-fields {grid-template-columns:repeat(2,minmax(0,1fr));} }
+
+#creation-guide button { min-height:38px; padding:8px 14px; border-radius:8px; cursor:pointer; }
+#creation-guide .creation-operation-card > button.primary { min-height:46px; padding:10px 18px; font-weight:800; }
+#creation-guide button:disabled { cursor:default; opacity:.45; }

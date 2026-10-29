@@ -13,7 +13,8 @@ import {
   predictArtianBaseRolls,
 } from "./artian-base-rng.js";
 import { localizedTargetName, t } from "./i18n.js";
-import { mountCreationGuide, finalCounters } from "./creation-guide.js";
+import { mountCreationWorkbench } from "./creation-workbench.js?v=1";
+import { WORKBENCH_KEY, transition, stateSignature, writeAtomic } from "./creation-operations.js";
 import { setupResultToolbars } from "./result-toolbars.js";
 
 const WEAPON_TYPES = [
@@ -1266,6 +1267,7 @@ let bonusWishMatchesOnly = null;
 let selectedSkillCounter = null;
 let skillObservedCount = 0;
 let currentSkillObservations = [];
+let creationWorkbench = null;
 
 wireTablePagers();
 closeSaveFeedbackButton?.addEventListener("click", hideSaveFeedback);
@@ -1873,6 +1875,7 @@ function setActiveTab(tabName, updateHash = true) {
   if (updateHash && location.hash !== `#${validTab}`) history.replaceState(null, "", `#${validTab}`);
   // 狙い（04）の希望が変わっていることがあるので、開くたびに書き直す
   if (validTab === "artian-owned") renderArtianOwnedTab();
+  if (validTab === "artian-create") creationWorkbench?.refresh();
 }
 
 function syncRuntimeFromSaveState() {
@@ -7877,9 +7880,9 @@ function createArtianOwnedTab() {
   panel.className = "panel owned-tab-panel artian-owned-panel";
   panel.innerHTML = `
     <div class="section-heading"><div><p class="step">MY NORMAL ARTIAN</p><h2>手持ち武器【通常アーティア】</h2></div></div>
-    <p class="prediction-intro">持っている通常アーティア（巨戟化したが、復元強化はまだのものも含む）の5枠の系統を登録します。
+    <p class="prediction-intro">通常アーティアのままの武器を登録します。05で作成を記録すると自動でここに入り、05で巨戟化を記録すると手持ち武器【巨戟】へ移ります。
     ① 04の表に、同じ系統の組み合わせが出たら「所持済み」の印を出します（作るのをやめる必要はありません。もう1本ほしければ作れます）。
-    ② 07で決めた狙いに合うかを判定します（巨戟化の候補）。③ 巨戟化したら「巨戟化した」ボタンで 手持ち武器【巨戟】に移すと、07の「同じ構成で再復元」の予測に使われます。</p>
+    ② 07で決めた狙いに合うかを判定します（巨戟化の候補）。③ 「05で巨戟化・復元へ」から予測を確認して記録すると、スキルカウンターと手持ち武器を一緒に更新できます。</p>
     <div class="artian-owned-body"></div>`;
   view.append(panel);
   lastView.after(view);
@@ -8097,15 +8100,13 @@ function createArtianOwnedItem(weapon) {
   const moveButton = document.createElement("button");
   moveButton.type = "button";
   moveButton.className = "secondary small-button";
-  moveButton.textContent = "巨戟化した（手持ち【巨戟】へ移す）";
-  moveButton.title = "07の「同じ構成で再復元」の予測で使えるようになります";
+  moveButton.textContent = "05で巨戟化・復元へ";
+  moveButton.title = "05で予測と激化タイプを確認してから巨戟化を記録します";
   moveButton.addEventListener("click", () => {
-    if (weapon.attr === 1 && !weapon.element) {
-      artianOwnedUi.message = "先に、この武器の属性の種類（火・水など）を選んでください。";
-      renderArtianOwnedTab();
-      return;
-    }
-    moveArtianOwnedToKyogeki(weapon, weapon.attr === 1 ? weapon.element : 0);
+    if (!creationWorkbench) return;
+    void creationWorkbench.select({kind:'normal',id:weapon.id});
+    setActiveTab('artian-create');
+    document.querySelector('.app-tabs')?.scrollIntoView({behavior:'smooth',block:'start'});
   });
   const removeButton = document.createElement("button");
   removeButton.type = "button";
@@ -8126,40 +8127,6 @@ function createArtianOwnedItem(weapon) {
   controls.append(moveButton, removeButton);
   item.append(head, tags, controls);
   return item;
-}
-
-// 巨戟化した通常アーティアを、手持ち武器【巨戟】（復元ボーナスは系統だけ・EX数で判定）に移す
-function moveArtianOwnedToKyogeki(weapon, attributeForce) {
-  if (ownedWeapons.length >= MAX_OWNED_WEAPONS) {
-    artianOwnedUi.message = `手持ち武器【巨戟】は最大${MAX_OWNED_WEAPONS}本です。不要な武器を削除してください。`;
-    renderArtianOwnedTab();
-    return;
-  }
-  const kyogeki = {
-    id: createTargetId(),
-    label: weapon.label,
-    boost: "",
-    subtype: "",
-    seriesIndex: null,
-    groupIndex: null,
-    weaponType: weapon.weaponType,
-    attributeForce,
-    bonuses: [null, null, null, null, null],
-    categories: weapon.ids.map((bonusId) => ARTIAN_CATEGORY_BY_ID.get(bonusId)),
-    rule: "ex",
-    minEx: 2,
-  };
-  const problem = ownedWeaponProblem(kyogeki);
-  if (problem) {
-    artianOwnedUi.message = `移せませんでした：${problem}`;
-    renderArtianOwnedTab();
-    return;
-  }
-  ownedWeapons.push(kyogeki);
-  artianOwned = artianOwned.filter((candidate) => candidate.id !== weapon.id);
-  artianOwnedUi.message = `${artianOwnedWeaponText(weapon)}を手持ち武器【巨戟】に移しました。07の「次の一致」で、同じ構成での再復元が予測に出ます。`;
-  onOwnedWeaponsChanged();
-  onArtianOwnedChanged();
 }
 
 function setupChatGPTTabs() {
@@ -8193,62 +8160,64 @@ function setupChatGPTTabs() {
   nav.style.setProperty("--tab-count", String(order.length));
 }
 
-// 保存中の状態と案内の起点を照合してから、一括で反映する。
-async function commitCreationGuide(draft) {
-  const { config: c, origin: o, choices } = draft;
-  if (saveState.baseSeed !== o.baseSeed || artianBaseCounterForWeapon(c.weaponType) !== o.normal ||
-      saveState.skillCounter !== o.skill || saveState.bonusCounter !== o.bonus) {
-    throw new Error("現在のカウンターが案内開始時から変更されています。更新せずに停止しました。");
-  }
-  if (ownedWeapons.length >= MAX_OWNED_WEAPONS) throw new Error("手持ち武器が上限140本です。不要な登録を整理してから、もう一度完成を記録してください。");
-  const next = finalCounters(o, draft.used);
-  const subtype = OWNED_SUBTYPE_BY_BOOST[c.weaponType]?.[c.boost] ?? "";
-  const weapon = {
-    id: createTargetId(), weaponType: c.weaponType, attributeForce: c.attributeForce,
-    label: c.label || [`【${c.boost}】`, subtype, optionName(ATTRIBUTES, c.attributeForce)].filter(Boolean).join(" ").slice(0, 24),
-    boost: c.boost, subtype, ...choices.skill, bonuses: [...choices.bonus],
-    categories: choices.bonus.map(bonusCategoryId), rule: "upgrade", minEx: c.minEx, keepAttack: true,
+function workbenchRead() {
+  return {
+    model: JSON.parse(JSON.stringify({ saveState, artianBaseState, normalOwned: artianOwned, ownedWeapons })),
+    stamp: JSON.stringify([STORAGE_KEY, ARTIAN_OWNED_KEY, OWNED_WEAPONS_KEY].map(key => [key, localStorage.getItem(key)])),
   };
-  const problem = ownedWeaponProblem(weapon); if (problem) throw new Error(problem);
-  const nextState = { ...saveState, skillCounter: next.skill, bonusCounter: next.bonus, skillSource: "作成案内", bonusSource: "作成案内" };
-  const key = artianBaseCounterKey(c.weaponType);
-  const nextArtian = { ...artianBaseState, counters: { ...artianBaseState.counters, [key]: next.normal }, sources: { ...artianBaseState.sources, [key]: "作成案内" } };
-  const nextOwned = [...ownedWeapons, weapon];
-  const previous = [STORAGE_KEY, OWNED_WEAPONS_KEY].map((key) => [key, localStorage.getItem(key)]);
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ saveState: nextState, targets: comparisonTargets, bonusPrediction, artianBaseState: nextArtian }));
-    localStorage.setItem(OWNED_WEAPONS_KEY, JSON.stringify(nextOwned));
-  } catch (error) {
-    for (const [key, value] of previous) {
-      try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* 元のメモリ状態を維持する。 */ }
-    }
-    throw new Error("ブラウザに保存できませんでした。カウンターを進めずに停止しました。保存領域を確認してください。", { cause: error });
+}
+function workbenchPreferences() {
+  try { return JSON.parse(localStorage.getItem(WORKBENCH_KEY) ?? 'null') ?? {}; } catch { return {}; }
+}
+function saveWorkbenchPreferences(settings) {
+  localStorage.setItem(WORKBENCH_KEY, JSON.stringify({ ...workbenchPreferences(), ...settings, version: 1 }));
+}
+async function commitWorkbench(action, expected, settings) {
+  const current = workbenchRead();
+  if (current.stamp !== expected.stamp || stateSignature(current.model) !== stateSignature(expected.model)) {
+    throw new Error('予測の表示後にカウンターか手持ち武器が変わりました。最新の予測を確認して、もう一度記録してください。');
   }
-  saveState = nextState; artianBaseState = nextArtian; ownedWeapons = nextOwned;
-  syncRuntimeFromSaveState(); renderSaveState(); onOwnedWeaponsChanged();
+  let result, last;
+  if (action.type === 'undo') {
+    const previous = workbenchPreferences().last;
+    if (!previous?.before || previous.afterSignature !== stateSignature(current.model)) throw new Error('直前の記録後にデータが変わったため取り消せません。現在位置を確認してください。');
+    result = {state: previous.before, selected: previous.selectedBefore ?? null, message:'直前の記録を取り消しました。ゲーム内の状態とカウンターが合っているか確認してください。'};
+    last = null;
+  } else {
+    result = transition(current.model, action);
+    last = {before:current.model, afterSignature:stateSignature(result.state), selectedBefore:workbenchPreferences().selected??null, message:result.message, at:new Date().toISOString()};
+  }
+  const nextSettings={...workbenchPreferences(),...settings,version:1,selected:result.selected,last,message:result.message};
+  const model=result.state;
+  writeAtomic(localStorage, {
+    [STORAGE_KEY]:JSON.stringify({saveState:model.saveState, targets:comparisonTargets, bonusPrediction, artianBaseState:model.artianBaseState}),
+    [ARTIAN_OWNED_KEY]:JSON.stringify(model.normalOwned),
+    [OWNED_WEAPONS_KEY]:JSON.stringify(model.ownedWeapons),
+    [WORKBENCH_KEY]:JSON.stringify(nextSettings),
+  });
+  saveState=model.saveState; artianBaseState=model.artianBaseState; artianOwned=model.normalOwned; ownedWeapons=model.ownedWeapons;
+  syncRuntimeFromSaveState(); renderSaveState(); renderArtianOwnedTab(); renderOwnedWeaponSection();
   refreshArtianBasePredictions();
   void refreshPredictions(); void refreshComparisonPredictions(); void refreshSkillPredictions();
-  showSavedCounters([`作成 ${next.normal}・スキル ${next.skill}・復元 ${next.bonus} に更新しました。`, "完成武器を手持ち武器【巨戟】に登録しました。"]);
+  return { ...result, preferences: nextSettings };
 }
 
-mountCreationGuide(document.querySelector("#creation-guide"), {
-  weapons: WEAPON_TYPES, attributes: ATTRIBUTES, boosts: OWNED_BOOST_OPTIONS.filter(([id]) => id),
-  groups: GROUP_SKILLS, series: SERIES_SKILLS, pool: artianBasePool,
-  snapshot: (weaponType) => ({ baseSeed: saveState.baseSeed, normal: artianBaseCounterForWeapon(weaponType), skill: saveState.skillCounter, bonus: saveState.bonusCounter }),
-  normal: (seed, weaponType, counter, count, attribute) => predictArtianBaseRolls(seed, weaponType, ARTIAN_R8_ENUM, BOWGUN_WEAPON_TYPES.has(weaponType) ? 0 : attribute, counter, count),
-  ready: ensurePredictionWasm,
-  skill: (seed, weapon, attribute, counter, count) => predict_skill_rolls(seed, weapon, attribute, counter, SKILL_COUNTER_GATE, count),
-  bonus: (seed, weapon, attribute, counter, count, mode, categories) => mode === "keep"
-    ? predict_gogma_keep_rolls(seed, weapon, attribute, counter, 35, count, new Uint8Array(categories))
-    : predict_gogma_rolls(seed, weapon, attribute, counter, 35, count),
-  category: bonusCategoryId, isEx: (id) => EX_BONUS_IDS.has(id),
-  normalName: artianBaseBonusName, bonusName: gogmaBonusName,
-  tag: (weaponType, id, normal) => {
-    const tag = document.createElement("span");
-    tag.className = `bonus-tag ${normal ? artianBaseBonusClassName(id) : bonusClassName(id)}${!normal && EX_BONUS_IDS.has(id) ? " ex" : ""}`;
-    tag.textContent = normal ? artianBaseBonusName(weaponType, id) : gogmaBonusName(weaponType, id); return tag;
-  },
-  csv: downloadCsv, commit: commitCreationGuide, open: setActiveTab,
+creationWorkbench = mountCreationWorkbench(document.querySelector('#creation-guide'), {
+  read:workbenchRead, preferences:workbenchPreferences, savePreferences:saveWorkbenchPreferences, commit:commitWorkbench,
+  watchedKeys:[STORAGE_KEY,ARTIAN_OWNED_KEY,OWNED_WEAPONS_KEY],
+  weapons:WEAPON_TYPES, attributes:ATTRIBUTES, boosts:OWNED_BOOST_OPTIONS.filter(([id])=>id),
+  series:SERIES_SKILLS, groups:GROUP_SKILLS,
+  createId:createTargetId, open:setActiveTab, pool:artianBasePool,
+  normal:(seed,type,attr,counter)=>predictArtianBaseRolls(seed,type,ARTIAN_R8_ENUM,BOWGUN_WEAPON_TYPES.has(type)?0:attr,counter,1)[0].bonusIds,
+  ready:ensurePredictionWasm,
+  skill:(seed,type,attr,counter)=>{const index=predict_skill_rolls(seed,type,attr,counter,SKILL_COUNTER_GATE,1)[0]; return {seriesIndex:Math.floor(index/GROUP_SKILLS.length),groupIndex:index%GROUP_SKILLS.length};},
+  bonus:(seed,type,attr,counter,mode,categories)=>Array.from(mode==='keep'
+    ?predict_gogma_keep_rolls(seed,type,attr,counter,35,1,new Uint8Array(categories))
+    :predict_gogma_rolls(seed,type,attr,counter,35,1)),
+  normalName:artianBaseBonusName, bonusName:gogmaBonusName, bonusOptions:gogmaBonusesForWeapon,
+  subtype:(type,boost)=>OWNED_SUBTYPE_BY_BOOST[type]?.[boost]??'',
+  autoLabel:(type,attr,boost)=>[boost?'【'+boost+'】':'',OWNED_SUBTYPE_BY_BOOST[type]?.[boost]??'',optionName(ATTRIBUTES,attr)].filter(Boolean).join(' ').slice(0,24),
+  tag:(type,id,normal)=>{const tag=document.createElement('span');tag.className='bonus-tag '+(normal?artianBaseBonusClassName(id):bonusClassName(id))+(!normal&&EX_BONUS_IDS.has(id)?' ex':'');tag.textContent=normal?artianBaseBonusName(type,id):gogmaBonusName(type,id);return tag;},
 });
 
 setupResultToolbars([
