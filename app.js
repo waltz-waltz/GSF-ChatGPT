@@ -1000,6 +1000,8 @@ const skillFilterOperatorSelect = document.querySelector("#skill-filter-operator
 const skillFilterSeriesOptions = document.querySelector("#skill-filter-series-options");
 const exportSkillCsvButton = document.querySelector("#export-skill-csv");
 const skillExportStatus = document.querySelector("#skill-export-status");
+let skillResultWeaponSelect = null;
+let skillResultAttributeSelect = null;
 const skillObservationRows = document.querySelector("#skill-observation-rows");
 const addSkillObservationButton = document.querySelector("#add-skill-observation");
 const removeSkillObservationButton = document.querySelector("#remove-skill-observation");
@@ -4352,6 +4354,10 @@ function loadBonusView() {
     // 手持ち武器の一覧の並べ方：manual＝登録した順（↑↓で並び替え）、type＝武器種ごと
     ownedSort: saved.ownedSort === "type" ? "type" : "manual",
     weaponOrder: normalizeBonusWeaponOrder(saved.weaponOrder),
+    skillResultScope: {
+      weaponType: Number.isInteger(saved.skillResultScope?.weaponType) && saved.skillResultScope.weaponType >= 0 && saved.skillResultScope.weaponType <= 13 ? saved.skillResultScope.weaponType : null,
+      attributeForce: Number.isInteger(saved.skillResultScope?.attributeForce) && saved.skillResultScope.attributeForce >= 0 && saved.skillResultScope.attributeForce <= 9 ? saved.skillResultScope.attributeForce : null,
+    },
   };
 }
 function persistBonusView(view) {
@@ -6786,14 +6792,46 @@ function skillRollMatchesFilter(roll, filter) {
     : groupMatches || seriesMatches;
 }
 
+function filteredSkillPredictionTargets() {
+  const weapon = skillResultWeaponSelect?.value ?? '';
+  const attribute = skillResultAttributeSelect?.value ?? '';
+  return skillPredictionRollSets.filter(target => (weapon === '' || target.weaponType === Number(weapon))
+    && (attribute === '' || target.attributeForce === Number(attribute)));
+}
+
+function setupSkillResultScope() {
+  const bar = skillTableWrap.previousElementSibling;
+  if (!bar?.classList.contains('result-toolbar')) return;
+  const box = document.createElement('div'); box.className = 'skill-result-scope';
+  const saved = loadBonusView().skillResultScope;
+  const field = (text,items,value,id,ariaLabel) => {
+    const label = document.createElement('label');const caption = document.createElement('span');caption.textContent=text;
+    const select = document.createElement('select');select.id=id;select.setAttribute('aria-label',ariaLabel);
+    for (const [key,name] of items) {const option=document.createElement('option');option.value=key;option.textContent=name;select.append(option);}
+    select.value=value??'';label.append(caption,select);box.append(label);return select;
+  };
+  skillResultWeaponSelect = field('武器種',[['','すべての武器種'],...WEAPON_TYPES],saved.weaponType,'skill-result-weapon-type','結果の武器種');
+  skillResultAttributeSelect = field('属性',[['','すべての属性'],...ATTRIBUTES],saved.attributeForce,'skill-result-attribute','結果の属性');
+  const update = () => {
+    const view=loadBonusView();view.skillResultScope={weaponType:skillResultWeaponSelect.value===''?null:Number(skillResultWeaponSelect.value),attributeForce:skillResultAttributeSelect.value===''?null:Number(skillResultAttributeSelect.value)};
+    persistBonusView(view);renderSkillPredictionTable();
+  };
+  skillResultWeaponSelect.addEventListener('change',update);skillResultAttributeSelect.addEventListener('change',update);
+  const clear=document.createElement('button');clear.type='button';clear.className='secondary small-button';clear.textContent='武器種・属性の絞り込みを解除';
+  clear.addEventListener('click',()=>{skillResultWeaponSelect.value='';skillResultAttributeSelect.value='';update();});
+  box.append(clear);bar.prepend(box);
+  renderSkillPredictionTable();
+}
+
 function skillPredictionVisibility(filter = selectedSkillFilter()) {
-  if (skillPredictionRollSets.length === 0) {
+  const targets = filteredSkillPredictionTargets();
+  if (targets.length === 0) {
     return { count: 0, matchingRowCount: 0, visibleIndices: [] };
   }
 
-  const count = skillPredictionRollSets[0].rolls.length;
+  const count = targets[0].rolls.length;
   const allIndices = Array.from({ length: count }, (_, index) => index);
-  const rowMatchesFilter = (index) => skillPredictionRollSets.some((target) =>
+  const rowMatchesFilter = (index) => targets.some((target) =>
     skillRollMatchesFilter(target.rolls[index], skillFilterForTarget(filter, target))
   );
   const matchingIndices = allIndices.filter(rowMatchesFilter);
@@ -6808,10 +6846,11 @@ function renderSkillPredictionTable() {
   if (skillPredictionRollSets.length === 0) return;
 
   const skillFilter = selectedSkillFilter();
+  const targets = filteredSkillPredictionTargets();
   const highlightEnabled = skillHighlightEnabled.checked;
   skillTableWrap.classList.toggle("skill-results-focused", skillFilter.enabled);
   const { count, matchingRowCount, visibleIndices } = skillPredictionVisibility(skillFilter);
-  const conditionMatchCount = skillPredictionRollSets.reduce((total, target) => {
+  const conditionMatchCount = targets.reduce((total, target) => {
     const targetFilter = skillFilterForTarget(skillFilter, target);
     return total + target.rolls.filter((roll) => skillRollMatchesFilter(roll, targetFilter)).length;
   }, 0);
@@ -6819,7 +6858,7 @@ function renderSkillPredictionTable() {
   const filterStatus = skillFilter.enabled
     ? `・条件一致${matchingRowCount.toLocaleString("ja-JP")}行`
     : "";
-  skillFutureStatus.textContent = `${skillPredictionRollSets.length.toLocaleString("ja-JP")}件 × ${count.toLocaleString("ja-JP")}回・条件一致${conditionMatchCount.toLocaleString("ja-JP")}セル${filterStatus}`;
+  skillFutureStatus.textContent = `${targets.length.toLocaleString("ja-JP")}件 × ${count.toLocaleString("ja-JP")}回・条件一致${conditionMatchCount.toLocaleString("ja-JP")}セル${filterStatus}`;
   skillFutureStatus.className = "status-pill complete";
   skillTableWrap.hidden = false;
   exportSkillCsvButton.disabled = visibleIndices.length === 0;
@@ -6840,7 +6879,7 @@ function renderSkillPredictionTable() {
     offsetHeader,
     stateHeader,
     matchHeader,
-    ...(skillFilter.enabled ? [] : skillPredictionRollSets.map((target) => {
+    ...(skillFilter.enabled ? [] : targets.map((target) => {
       const header = document.createElement("th");
       header.scope = "col";
       header.textContent = comparisonTargetName(target);
@@ -6851,9 +6890,9 @@ function renderSkillPredictionTable() {
   if (visibleIndices.length === 0) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = skillFilter.enabled ? 3 : 3 + skillPredictionRollSets.length;
+    cell.colSpan = skillFilter.enabled ? 3 : 3 + targets.length;
     cell.className = "prediction-empty";
-    cell.textContent = "指定したグループ・シリーズ条件に合う結果は表示範囲内にありません。表示回数を増やすか条件を変更してください。";
+    cell.textContent = targets.length === 0 ? "選んだ武器種・属性の登録がありません。絞り込みを解除するか、上の条件設定で武器を登録してください。" : "指定したグループ・シリーズ条件に合う結果は表示範囲内にありません。表示回数を増やすか条件を変更してください。";
     row.append(cell);
     skillPredictionRows.replaceChildren(row);
     return;
@@ -6866,6 +6905,7 @@ function renderSkillPredictionTable() {
 
 function exportVisibleSkillPredictionsCsv() {
   const { visibleIndices } = skillPredictionVisibility();
+  const targets = filteredSkillPredictionTargets();
   if (visibleIndices.length === 0 || skillPredictionRollSets.length === 0) {
     showSkillTargetError("CSVへ出力できるスキル未来予測の結果がありません。");
     return;
@@ -6875,7 +6915,7 @@ function exportVisibleSkillPredictionsCsv() {
   const headers = [
     t("何回先"),
     t("カウンター位置"),
-    ...skillPredictionRollSets.flatMap((target) => {
+    ...targets.flatMap((target) => {
       const targetName = predictionCsvTargetName(target);
       return [
         `${targetName} ${t("シリーズスキル")}`,
@@ -6886,7 +6926,7 @@ function exportVisibleSkillPredictionsCsv() {
   const rows = visibleIndices.map((index) => [
     index + 1,
     saveState.skillCounter + index + 1,
-    ...skillPredictionRollSets.flatMap((target) => {
+    ...targets.flatMap((target) => {
       const roll = target.rolls[index];
       return [
         t(SERIES_SKILLS[roll.seriesIndex] ?? `シリーズ ${roll.seriesIndex}`),
@@ -6916,7 +6956,7 @@ function createSkillPredictionRow(index, skillFilter, highlightEnabled) {
   matches.className = "skill-matches-grid";
   row.append(matchCell);
 
-  for (const target of skillPredictionRollSets) {
+  for (const target of filteredSkillPredictionTargets()) {
     const roll = target.rolls[index];
     // 一致の判定を色の強調から独立させ、強調OFFでも一致カードを残す。
     const conditionMatch = skillRollMatchesFilter(roll, skillFilterForTarget(skillFilter, target));
@@ -8710,5 +8750,6 @@ setupResultToolbars([
   { table: artianBaseTableWrap.querySelector("table"), exportButton: exportArtianBaseCsvButton, filter: artianFilterEnabled },
   { table: predictionRows.closest("table"), filter: predictionMatchesOnly },
 ]);
+setupSkillResultScope();
 setupTabEntryLinks();
 document.querySelectorAll(".prediction-export-actions, .bonus-export-actions, .comparison-table-options, .skill-filter-actions").forEach((box) => { if (!box.children.length) box.remove(); });

@@ -153,6 +153,10 @@
 .skill-replacement-item .comparison-bonus-set { grid-template-columns:repeat(5,auto); }
 .skill-replacement-item > button { margin-top:auto; }
 .result-toolbar .tab-entry-link { margin-left:auto; white-space:nowrap; }
+.skill-result-scope { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px 16px; flex-basis:100%; padding-bottom:14px; border-bottom:1px solid #575a43; }
+.skill-result-scope > label { display:grid; gap:6px; min-width:min(210px,100%); font-size:.8rem; font-weight:800; }
+.skill-result-scope select { width:100%; min-height:42px; padding:8px 12px; border:1px solid #777455; border-radius:8px; background:#151812; color:#f2eddc; font:inherit; }
+.skill-result-scope > button { min-height:42px; }
 .panel > .tab-entry-link { margin:0 0 16px; }
 #skill-table-wrap.skill-results-focused .skill-owned-badge { max-width:100%; }
 #skill-table-wrap.skill-results-focused .skill-missing-candidate { font-size:.77rem; }
