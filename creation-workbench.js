@@ -9,8 +9,8 @@ const h=(tag,text,cls)=>Object.assign(document.createElement(tag),{...(text===un
 export function mountCreationWorkbench(root,host) {
   let prefs=host.preferences();
   let form={weaponType:11,attributeForce:1,label:'',boost:'攻撃激化',mode:'keep',...prefs.form};
-  if(!host.weapons.some(([id])=>id===form.weaponType))form.weaponType=11;
-  if(!host.attributes.some(([id])=>id===form.attributeForce))form.attributeForce=1;
+  if(form.weaponType!==null&&!host.weapons.some(([id])=>id===form.weaponType))form.weaponType=null;
+  if(form.attributeForce!==null&&!host.attributes.some(([id])=>id===form.attributeForce))form.attributeForce=null;
   if(!host.boosts.some(([id])=>id===form.boost))form.boost='攻撃激化';
   if(!['keep','reset'].includes(form.mode))form.mode='keep';
   let selected=prefs.selected??null;
@@ -82,6 +82,7 @@ export function mountCreationWorkbench(root,host) {
   async function dispatch(action,basis) {
     const result=await host.commit(action,basis,{form,selected});
     selected=result.selected;message=result.message;prefs=result.preferences;
+    form={...form,...prefs.form};
     const unknown=action.type==='create'&&!isKnown(normalCounter(basis.model,action.weaponType))?'通常作成':action.type==='upgrade'&&!isKnown(basis.model.saveState.skillCounter)?'スキル':action.type==='restore'&&!isKnown(basis.model.saveState.bonusCounter)?'復元':null;
     if(unknown)message+=' '+unknown+'カウンターは未特定のままです。現在位置は特定タブで確認してください。';
   }
@@ -97,9 +98,12 @@ export function mountCreationWorkbench(root,host) {
     const source=sourceWeapon(model);
     if(selected&&!source){selected=null;changed();}
     if(bowgun(form.weaponType))form.attributeForce=0;
+    const hasWeapon=host.weapons.some(([id])=>id===form.weaponType);
+    const canCreate=hasWeapon&&host.attributes.some(([id])=>id===form.attributeForce);
     let normalPrediction=null, skillPrediction=null, keepPrediction=null, resetPrediction=null, predictionError='', upcoming=null;
-    const currentNormal=normalCounter(model,form.weaponType);
-    if(isKnown(save.baseSeed)&&isKnown(currentNormal)){
+    const counterType=hasWeapon?form.weaponType:source?.weaponType;
+    const currentNormal=isKnown(counterType)?normalCounter(model,counterType):null;
+    if(canCreate&&isKnown(save.baseSeed)&&isKnown(currentNormal)){
       try{normalPrediction=host.normal(save.baseSeed,form.weaponType,form.attributeForce,currentNormal);}catch(e){predictionError=e.message;}
     }
     let attribute=source?(selected.kind==='normal'?(source.attr===0||bowgun(source.weaponType)?0:source.element??form.selectedAttribute??null):source.attributeForce):null;
@@ -119,7 +123,7 @@ export function mountCreationWorkbench(root,host) {
       }catch(e){predictionError='自動予測を読み込めませんでした。実際の結果を選んで記録できます。'+e.message;}
     }
     try {
-      const selectedTarget=source?{...source,attributeForce:attribute,categories:selected.kind==='normal'?source.ids.map(id=>CATEGORY_IDS.indexOf(id)):source.categories}:{weaponType:form.weaponType,attributeForce:form.attributeForce};
+      const selectedTarget=source?{...source,attributeForce:attribute,categories:selected.kind==='normal'?source.ids.map(id=>CATEGORY_IDS.indexOf(id)):source.categories}:canCreate?{weaponType:form.weaponType,attributeForce:form.attributeForce}:null;
       upcoming=await host.upcoming(model,selectedTarget);
     } catch(e){predictionError+=' 次の希望ボーナスの確認ができませんでした。'+e.message;}
     if(revision!==renderId)return;
@@ -130,8 +134,8 @@ export function mountCreationWorkbench(root,host) {
     if(error){const p=h('p',error,'error');p.setAttribute('role','alert');root.append(p);}
     if(predictionError)root.append(h('p',predictionError,'error'));
     const counters=h('div',undefined,'creation-counter-strip');
-    for(const [text,value]of [[name(host.weapons,form.weaponType)+'の作成カウンター',currentNormal],['スキルカウンター（全武器共通）',save.skillCounter],['復元カウンター（全武器共通）',save.bonusCounter]]){
-      const item=h('div');item.append(h('span',text),h('strong',number(value)));counters.append(item);
+    for(const [text,value,unselected]of [[isKnown(counterType)?name(host.weapons,counterType)+'の作成カウンター':'通常作成カウンター（武器種を選択）',currentNormal,!isKnown(counterType)],['スキルカウンター（全武器共通）',save.skillCounter],['復元カウンター（全武器共通）',save.bonusCounter]]){
+      const item=h('div');item.append(h('span',text),h('strong',unselected?'未選択':number(value)));counters.append(item);
     }
     root.append(counters);
     if(upcoming?.matches.length){
@@ -162,16 +166,22 @@ export function mountCreationWorkbench(root,host) {
     const create=h('section',undefined,'creation-operation-card');
     create.append(h('h3','1. 通常アーティアを作成'));
     const row=h('div',undefined,'creation-toolbar');
-    const weaponSelect=select(host.weapons,form.weaponType,'creation-weapon');
-    weaponSelect.addEventListener('change',()=>{form.weaponType=Number(weaponSelect.value);changed();void render();});
-    const attrSelect=select(host.attributes,form.attributeForce,'creation-attribute');attrSelect.disabled=bowgun(form.weaponType);
-    attrSelect.addEventListener('change',()=>{form.attributeForce=Number(attrSelect.value);changed();void render();});
-    const normalEditor=bonusEditor(form.weaponType,form.attributeForce,normalPrediction,true,'create-normal-slot','予測と違う場合・未特定の場合は実際の5枠を選ぶ');
-    const createButton=button('作成',()=>dispatch({type:'create',id:host.createId(),weaponType:form.weaponType,attributeForce:form.attributeForce,label:root.querySelector('#creation-label').value.trim(),ids:normalEditor.values},basis),'primary','record-normal-create');
+    const weaponSelect=select([['','武器種を選択してください'],...host.weapons],form.weaponType??'','creation-weapon');
+    weaponSelect.addEventListener('change',()=>{form.weaponType=weaponSelect.value===''?null:Number(weaponSelect.value);changed();void render();});
+    const attrSelect=select([['','属性を選択してください'],...host.attributes],form.attributeForce??'','creation-attribute');attrSelect.disabled=!hasWeapon||bowgun(form.weaponType);
+    attrSelect.addEventListener('change',()=>{form.attributeForce=attrSelect.value===''?null:Number(attrSelect.value);changed();void render();});
+    const normalEditor=canCreate?bonusEditor(form.weaponType,form.attributeForce,normalPrediction,true,'create-normal-slot','予測と違う場合・未特定の場合は実際の5枠を選ぶ'):null;
+    const createButton=button('作成',()=>{
+      if(!canCreate)throw new Error('作る武器種と属性を選んでください。');
+      return dispatch({type:'create',id:host.createId(),weaponType:form.weaponType,attributeForce:form.attributeForce,label:root.querySelector('#creation-label').value.trim(),ids:normalEditor.values},basis);
+    },'primary','record-normal-create');
+    createButton.disabled=!canCreate;
     const nameInput=h('input');nameInput.type='text';nameInput.id='creation-label';nameInput.maxLength=24;nameInput.value=form.label;nameInput.placeholder='省略できます';nameInput.addEventListener('input',()=>{form.label=nameInput.value;});nameInput.addEventListener('change',()=>{form.label=nameInput.value.trim();changed();});
     row.append(label('作る武器種',weaponSelect),label('作る属性',attrSelect),createButton,label('名前（任意）',nameInput));
-    create.append(row,h('p','ゲーム内で通常の作成・復元強化を終えて5枠を確認したら「作成」を押してください。','pool-note'),h('p','作成を記録すると、'+name(host.weapons,form.weaponType)+'の作成カウンターだけが '+number(currentNormal)+' → '+(isKnown(currentNormal)?number(currentNormal+1):'未特定のまま')+' となり、手持ち武器【通常】に登録します。','pool-note'),
+    create.append(row,h('p','ゲーム内で通常の作成・復元強化を終えて5枠を確認したら「作成」を押してください。','pool-note'));
+    if(canCreate)create.append(h('p','作成を記録すると、'+name(host.weapons,form.weaponType)+'の作成カウンターだけが '+number(currentNormal)+' → '+(isKnown(currentNormal)?number(currentNormal+1):'未特定のまま')+' となり、手持ち武器【通常】に登録します。','pool-note'),
       h('h4',normalPrediction?'次に付く通常アーティアの5枠':'自動予測できないため、実際に付いた5枠を選んでください'),normalEditor.box);
+    else create.append(h('p','次に作る武器種と属性を選んでください。登録が完了すると、この入力欄は未選択に戻ります。','pool-note'));
     root.append(create);
 
     const chooser=h('section',undefined,'creation-operation-card');

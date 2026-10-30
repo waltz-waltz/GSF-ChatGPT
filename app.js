@@ -13,7 +13,7 @@ import {
   predictArtianBaseRolls,
 } from "./artian-base-rng.js";
 import { localizedTargetName, t } from "./i18n.js";
-import { mountCreationWorkbench } from "./creation-workbench.js?v=boost-features-1";
+import { mountCreationWorkbench } from "./creation-workbench.js?v=creation-reset-1";
 import { normalizeWeaponStatReference, makeWeaponStatReference, weaponStatComparison } from "./weapon-stats.js?v=20261030-1";
 import { WORKBENCH_KEY, transition, stateSignature, writeAtomic } from "./creation-operations.js";
 import { setupResultToolbars } from "./result-toolbars.js";
@@ -8537,6 +8537,8 @@ async function commitWorkbench(action, expected, settings) {
     last = {before:current.model, afterSignature:stateSignature(result.state), selectedBefore:workbenchPreferences().selected??null, message:result.message, at:new Date().toISOString()};
   }
   const nextSettings={...workbenchPreferences(),...settings,version:1,selected:result.selected,last,message:result.message};
+  // 作成の登録と入力欄のリセットを一緒に保存する。失敗したら入力も元のまま。
+  if(action.type==='create')nextSettings.form={...nextSettings.form,weaponType:null,attributeForce:null,label:''};
   const model=result.state;
   writeAtomic(localStorage, {
     [STORAGE_KEY]:JSON.stringify({saveState:model.saveState, targets:comparisonTargets, bonusPrediction, artianBaseState:model.artianBaseState}),
