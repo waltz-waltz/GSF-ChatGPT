@@ -13,9 +13,10 @@ import {
   predictArtianBaseRolls,
 } from "./artian-base-rng.js";
 import { localizedTargetName, t } from "./i18n.js";
-import { mountCreationWorkbench } from "./creation-workbench.js?v=creation-reset-1";
+import { mountCreationWorkbench } from "./creation-workbench.js?v=operation-feedback-1";
 import { normalizeWeaponStatReference, makeWeaponStatReference, weaponStatComparison } from "./weapon-stats.js?v=20261030-1";
-import { WORKBENCH_KEY, transition, stateSignature, writeAtomic } from "./creation-operations.js";
+import { WORKBENCH_KEY, transition, stateSignature, writeAtomic, normalCounter, validateNormal, validateBonuses } from "./creation-operations.js";
+import { performConfirmedOperation, advanceCounter, counterChangeMessages } from "./operation-feedback.js?v=1";
 import { setupResultToolbars } from "./result-toolbars.js";
 
 const WEAPON_TYPES = [
@@ -2134,69 +2135,30 @@ function readOptionalStateNumber(input, label, maximum) {
 }
 
 function applyManualSaveState() {
-  manualStateError.hidden = true;
-  manualStateMessage.textContent = "";
-  try {
-    const baseSeed = readStateNumber(manualStateBaseSeedInput, "基準seed", 99_999_999);
-    const bonusCounter = readOptionalStateNumber(
-      manualStateBonusCounterInput,
-      "復元ボーナスカウンター",
-      0xffffffff,
-    );
-    const skillCounter = readOptionalStateNumber(
-      manualStateSkillCounterInput,
-      "スキルカウンター",
-      0xffffffff,
-    );
-    saveState = {
-      baseSeed,
-      bonusCounter,
-      skillCounter,
-      baseSource: "手入力",
-      bonusSource: bonusCounter === null ? null : "手入力",
-      skillSource: skillCounter === null ? null : "手入力",
-    };
-    renderSaveState();
-    manualStateMessage.textContent = "入力した値を現在のセーブ状態に設定しました。空欄のカウンターは未特定として扱います。";
-  } catch (error) {
-    manualStateError.textContent = error instanceof Error ? error.message : String(error);
-    manualStateError.hidden = false;
-  }
+  return runCounterSetting('基準seedとカウンターを手入力の値に変更しますか？',model=>{
+    const baseSeed=readStateNumber(manualStateBaseSeedInput,'基準seed',99999999);
+    const bonusCounter=readOptionalStateNumber(manualStateBonusCounterInput,'復元ボーナスカウンター',0xffffffff);
+    const skillCounter=readOptionalStateNumber(manualStateSkillCounterInput,'スキルカウンター',0xffffffff);
+    model.saveState={baseSeed,bonusCounter,skillCounter,baseSource:'手入力',bonusSource:bonusCounter===null?null:'手入力',skillSource:skillCounter===null?null:'手入力'};
+  });
 }
 
-async function applyBonusPredictionState() {
-  bonusStateError.hidden = true;
-  bonusStateMessage.textContent = "";
-  try {
-    const baseSeed = readStateNumber(bonusStateBaseSeedInput, "基準seed", 99_999_999);
-    const bonusCounter = readStateNumber(
-      bonusStateCounterInput,
-      "復元ボーナスカウンター",
-      0xffffffff,
-    );
-    setStateFromBonus(baseSeed, bonusCounter, "手入力");
-    predictionPanel.hidden = false;
-    await Promise.all([refreshPredictions(), refreshComparisonPredictions()]);
-    bonusStateMessage.textContent = "入力した基準seedと復元ボーナスカウンターを0地点として予測しました。";
-  } catch (error) {
-    bonusStateError.textContent = error instanceof Error ? error.message : String(error);
-    bonusStateError.hidden = false;
-  }
+function applyBonusPredictionState() {
+  return runCounterSetting('この値を復元予測の0地点に設定しますか？',model=>{
+    const baseSeed=readStateNumber(bonusStateBaseSeedInput,'基準seed',99999999);
+    const bonusCounter=readStateNumber(bonusStateCounterInput,'復元ボーナスカウンター',0xffffffff);
+    const changed=model.saveState.baseSeed!==null&&model.saveState.baseSeed!==baseSeed;
+    model.saveState={...model.saveState,baseSeed,bonusCounter,skillCounter:changed?null:model.saveState.skillCounter,baseSource:'手入力',bonusSource:'手入力',skillSource:changed?null:model.saveState.skillSource};
+  },{tab:'bonus-future'});
 }
 
-async function applySkillPredictionState() {
-  skillStateError.hidden = true;
-  skillStateMessage.textContent = "";
-  try {
-    const baseSeed = readStateNumber(skillStateBaseSeedInput, "基準seed", 99_999_999);
-    const skillCounter = readStateNumber(skillStateCounterInput, "スキルカウンター", 0xffffffff);
-    setStateFromSkill(baseSeed, skillCounter, "手入力");
-    await refreshSkillPredictions();
-    skillStateMessage.textContent = "入力した基準seedとスキルカウンターを0地点として予測しました。";
-  } catch (error) {
-    skillStateError.textContent = error instanceof Error ? error.message : String(error);
-    skillStateError.hidden = false;
-  }
+function applySkillPredictionState() {
+  return runCounterSetting('この値をスキル予測の0地点に設定しますか？',model=>{
+    const baseSeed=readStateNumber(skillStateBaseSeedInput,'基準seed',99999999);
+    const skillCounter=readStateNumber(skillStateCounterInput,'スキルカウンター',0xffffffff);
+    const changed=model.saveState.baseSeed!==null&&model.saveState.baseSeed!==baseSeed;
+    model.saveState={...model.saveState,baseSeed,skillCounter,bonusCounter:changed?null:model.saveState.bonusCounter,baseSource:'手入力',skillSource:'手入力',bonusSource:changed?null:model.saveState.bonusSource};
+  },{tab:'skill-future'});
 }
 
 function formatGogmaContinuationCode(candidate, completedRolls) {
@@ -3192,50 +3154,24 @@ function bonusCategoryId(bonusId) {
   throw new Error(`未対応の復元ボーナスIDです: ${bonusId}`);
 }
 
-async function beginKeepOptimization(target, bonusIds, completedRolls) {
-  if (saveState.baseSeed === null || saveState.bonusCounter === null) return;
-  let profile = target.id
-    ? comparisonTargets.find((candidate) => candidate.id === target.id)
-    : comparisonTargets.find(
-        (candidate) => comparisonCombinationKey(candidate) === comparisonCombinationKey(target),
-      );
-  if (!profile) {
-    if (comparisonTargets.length >= MAX_REGISTERED_TARGETS) {
-      showComparisonError(`EX厳選へ引き継ぐには、登録武器を${MAX_REGISTERED_TARGETS}件未満にしてください。`);
-      return;
+function beginKeepOptimization(target, bonusIds, completedRolls) {
+  return performConfirmedOperation(() => {
+    const basis = workbenchRead();
+    const model = advanceCounter(basis.model,'bonus',completedRolls);
+    validateBonuses(target.weaponType,target.attributeForce,bonusIds);
+    const targets = JSON.parse(JSON.stringify(comparisonTargets));
+    let profile = target.id ? targets.find(w=>w.id===target.id) : targets.find(w=>comparisonCombinationKey(w)===comparisonCombinationKey(target));
+    if (!profile) {
+      if (targets.length >= MAX_REGISTERED_TARGETS) throw new Error('登録できる狙いの上限です。整理してからEX厳選へ進んでください。');
+      profile = {...target,id:createTargetId(),label:target.label??''}; targets.push(profile);
     }
-    profile = {
-      ...target,
-      id: createTargetId(),
-      label: target.label ?? "",
-      keepCategories: [null, null, null, null, null],
-      keepSource: null,
-    };
-    comparisonTargets.push(profile);
-  }
-  profile.keepCategories = bonusIds.map(bonusCategoryId);
-  profile.keepSource = `${completedRolls}回先のリセット結果`;
-  bonusPrediction.mode = "keep";
-
-  const nextCounter = saveState.bonusCounter + completedRolls;
-  if (!isValidCounter(nextCounter)) return;
-  setStateFromBonus(saveState.baseSeed, nextCounter, "予測結果");
-  lastSearchConfig = {
-    weaponType: profile.weaponType,
-    attributeForce: profile.attributeForce,
-    counterGate: 35,
-    observations: [],
-  };
-  predictionWeaponSelect.value = String(profile.weaponType);
-  predictionAttributeSelect.value = String(profile.attributeForce);
-  predictionOrigin.textContent = "0";
-  renderComparisonTargets();
-  renderBonusOperation();
-  renderPredictionFilters();
-  updatePredictionPoolNote();
-  bonusStateMessage.textContent = `${comparisonTargetName(profile)}の${completedRolls}回先を採用した状態へ進み、「ボーナスを同じ構成で再復元」のEX厳選に切り替えました。`;
-  await Promise.all([refreshPredictions(), refreshComparisonPredictions()]);
-  setActiveTab("bonus-future");
+    profile.keepCategories=bonusIds.map(bonusCategoryId); profile.keepSource=completedRolls+'回先のリセット結果';
+    const success='カウンターと狙いの構成を反映し、「同じ構成で再復元」のEX厳選へ切り替えました。手持ち武器は変更していません。';
+    return {title:'この構成を採用してEX厳選へ進みますか？',summary:operationWeaponPreview({target,bonuses:bonusIds}),
+      message:'復元カウンターと狙いの構成を変更します。手持ち武器への登録・上書きは行いません。',
+      lines:counterChangeMessages(basis.model,model,WEAPON_TYPES),confirmLabel:'この構成でカウンターを進める',
+      verify:()=>assertOperationBasis(basis),execute:()=>commitCounterModel(model,basis,{targets,prediction:{...bonusPrediction,mode:'keep'},tab:'bonus-future',success,selection:profile}),success:result=>result.message};
+  });
 }
 
 function flattenedPrefixMatches(actual, expected) {
@@ -3414,43 +3350,14 @@ function createSavedStateCell(kind, completedRolls, keepTransition = null, compa
   return cell;
 }
 
-async function adoptBonusPosition(completedRolls) {
-  if (saveState.baseSeed === null || saveState.bonusCounter === null) return;
-  const nextCounter = saveState.bonusCounter + completedRolls;
-  if (!isValidCounter(nextCounter)) return;
-  setStateFromBonus(saveState.baseSeed, nextCounter, "予測結果");
-  lastSearchConfig = {
-    weaponType: Number(predictionWeaponSelect.value),
-    attributeForce: Number(predictionAttributeSelect.value),
-    counterGate: 35,
-    observations: [],
-  };
-  predictionOrigin.textContent = "0";
-  bonusStateMessage.textContent = `復元ボーナスカウンター${nextCounter.toLocaleString("ja-JP")}を新しい0地点にしました。`;
-  showSaveFeedback(`復元ボーナスカウンター ${nextCounter.toLocaleString("ja-JP")} を保存しました。`, []);
-  await Promise.all([
-    refreshPredictions(),
-    refreshComparisonPredictions(),
-    saveState.skillCounter === null ? Promise.resolve() : refreshSkillPredictions(),
-  ]);
-  setActiveTab("bonus-future");
+function adoptBonusPosition(completedRolls) {
+  return runCounterChange({kind:'bonus',steps:completedRolls,title:'復元カウンターの0地点を変更しますか？',
+    success:'復元カウンターの0地点を変更しました。手持ち武器は変更していません。'});
 }
 
-async function adoptSkillPosition(completedRolls) {
-  if (saveState.baseSeed === null || saveState.skillCounter === null) return;
-  const nextCounter = saveState.skillCounter + completedRolls;
-  if (!isValidCounter(nextCounter)) return;
-  setStateFromSkill(saveState.baseSeed, nextCounter, "予測結果");
-  currentSkillObservations = [];
-  skillObservedCount = 0;
-  skillStateMessage.textContent = `スキルカウンター${nextCounter.toLocaleString("ja-JP")}を新しい0地点にしました。`;
-  showSaveFeedback(`スキルカウンター ${nextCounter.toLocaleString("ja-JP")} を保存しました。`, []);
-  await Promise.all([
-    refreshSkillPredictions(),
-    selectedCandidate ? refreshPredictions() : Promise.resolve(),
-    selectedCandidate ? refreshComparisonPredictions() : Promise.resolve(),
-  ]);
-  setActiveTab("skill-future");
+function adoptSkillPosition(completedRolls) {
+  return runCounterChange({kind:'skill',steps:completedRolls,title:'スキルカウンターの0地点を変更しますか？',
+    success:'スキルカウンターの0地点を変更しました。手持ち武器は変更していません。'});
 }
 
 function bonusClassName(bonusId) {
@@ -5174,7 +5081,97 @@ function ownedLayoutText(weapon) {
     .join(" ");
 }
 
-// 採用するときの窓（画面の真ん中・いちばん手前）。押しただけでは何も変わらず、窓で選んだときに反映する。
+function assertOperationBasis(expected) {
+  const current = workbenchRead();
+  if (current.stamp !== expected.stamp || stateSignature(current.model) !== stateSignature(expected.model)) {
+    throw new Error('確認中にカウンターか手持ち武器が変わりました。最新の状態で予測を開き直してください。');
+  }
+}
+
+function operationPreviewRow(label, ...nodes) {
+  const row = document.createElement('div'); row.className = 'adopt-flow-row';
+  const caption = document.createElement('span'); caption.className = 'adopt-flow-label'; caption.textContent = label;
+  row.append(caption, ...nodes); return row;
+}
+
+function operationWeaponPreview({target, weapon, skills, bonuses, normal = false}) {
+  const box = document.createElement('div'); box.className = 'adopt-flow';
+  box.append(operationPreviewRow('対象の武器', ...createWeaponBadge(target)));
+  if (target.boost) {
+    const feature = document.createElement('strong'); feature.textContent = `【${target.boost}】${skillBoostFeature(target,target.boost)}`;
+    box.append(operationPreviewRow('激化・特徴', feature));
+  }
+  if (weapon) box.append(operationPreviewRow('今のスキル',createOwnedSummarySkills(weapon)),operationPreviewRow('今のボーナス',createOwnedBonusChips(weapon)));
+  if (skills) box.append(operationPreviewRow('反映するスキル', createOwnedSummarySkills(skills)));
+  if (bonuses) {
+    const tags = normal ? document.createElement('div') : createCompactBonusSet(target, bonuses);
+    if (normal) { tags.className = 'artian-mini-tags'; for (const id of bonuses) {
+      const tag = document.createElement('span'); tag.className = 'bonus-tag compact ' + artianBaseBonusClassName(id);
+      tag.textContent = artianBaseBonusName(target.weaponType,id); tags.append(tag);
+    }}
+    box.append(operationPreviewRow('反映する5枠', tags));
+  }
+  return [box];
+}
+
+// 予測からの採用は、カウンターと所持武器を同じ保存で更新する。
+async function commitCounterModel(model, expected, {targets = comparisonTargets, prediction = bonusPrediction, tab, success, selection}) {
+  assertOperationBasis(expected);
+  writeAtomic(localStorage, {
+    [STORAGE_KEY]: JSON.stringify({saveState:model.saveState, targets, bonusPrediction:prediction, artianBaseState:model.artianBaseState}),
+    [ARTIAN_OWNED_KEY]: JSON.stringify(model.normalOwned),
+    [OWNED_WEAPONS_KEY]: JSON.stringify(model.ownedWeapons),
+  });
+  saveState = model.saveState; artianBaseState = model.artianBaseState; artianOwned = model.normalOwned; ownedWeapons = model.ownedWeapons;
+  comparisonTargets = targets; bonusPrediction = prediction;
+  let warning = '';
+  try {
+    if (selection) {
+      lastSearchConfig = {weaponType:selection.weaponType,attributeForce:selection.attributeForce,counterGate:35,observations:[]};
+      predictionWeaponSelect.value=String(selection.weaponType); predictionAttributeSelect.value=String(selection.attributeForce);
+    }
+    syncRuntimeFromSaveState(); renderSaveState(); renderOwnedWeaponSection(); renderArtianOwnedTab(); renderArtianBaseState();
+    renderComparisonTargets(); renderBonusOperation(); renderPredictionFilters();
+    if (tab === 'skill-future') { currentSkillObservations = []; skillObservedCount = 0; skillStateMessage.textContent = success; }
+    if (tab === 'bonus-future') { predictionOrigin.textContent = '0'; bonusStateMessage.textContent = success; }
+    const results = await Promise.allSettled([refreshArtianBasePredictions(),refreshPredictions(),refreshComparisonPredictions(),refreshSkillPredictions()]);
+    if (results.some(result => result.status === 'rejected')) warning = '一部の予測を更新できませんでした。保存は完了しています。画面を開き直して確認してください。';
+    if (tab) setActiveTab(tab);
+    showSaveFeedback(success, []);
+  } catch { warning = '保存は完了しています。画面を開き直して内容を確認してください。'; }
+  return {message:success + (warning ? ' ' + warning : ''), state:model};
+}
+
+function runCounterChange({kind, steps, weaponType, title, summary = [], change, success, confirmLabel = '反映してカウンターを進める', expected, onCancel, targets, prediction}) {
+  return performConfirmedOperation(() => {
+    const basis = expected ?? workbenchRead(); assertOperationBasis(basis);
+    const model = advanceCounter(basis.model, kind, steps, weaponType);
+    change?.(model);
+    return {
+      title, summary, message:success.replace(/しました。/g,'します。').replace(/していません。/g,'しません。'), confirmLabel, onCancel,
+      lines:counterChangeMessages(basis.model,model,WEAPON_TYPES,kind === 'normal' ? weaponType : null),
+      verify:() => assertOperationBasis(basis),
+      execute:() => commitCounterModel(model,basis,{targets,prediction,tab:kind === 'normal'?'artian-future':kind === 'skill'?'skill-future':'bonus-future',success}),
+      success:result => result.message,
+    };
+  });
+}
+
+function runCounterSetting(title, update, {tab, normalType = null} = {}) {
+  return performConfirmedOperation(() => {
+    const basis = workbenchRead(), model = JSON.parse(JSON.stringify(basis.model));
+    update(model);
+    if (model.artianBaseState.baseSeed !== model.saveState.baseSeed) model.artianBaseState = {baseSeed:model.saveState.baseSeed,counters:{},sources:{}};
+    const lines = counterChangeMessages(basis.model,model,WEAPON_TYPES,normalType);
+    const seedChanged = basis.model.saveState.baseSeed !== model.saveState.baseSeed;
+    if(seedChanged)lines.unshift('基準seed：'+(basis.model.saveState.baseSeed??'未特定')+' → '+model.saveState.baseSeed);
+    const success = '入力した現在位置を設定しました。手持ち武器は変更していません。';
+    return {title,lines,message:'手入力した値を現在位置として保存します。手持ち武器の登録内容は変更しません。'+(seedChanged?' 基準seedが変わるため、通常作成カウンターは特定し直してください。':''),confirmLabel:'この値を現在位置に設定する',
+      verify:()=>assertOperationBasis(basis),execute:()=>commitCounterModel(model,basis,{tab,success}),success:result=>result.message};
+  });
+}
+
+// 採用先を選ぶ窓。カウンターの変更は、その後の最終確認で確定する。
 // choices: [{ tag?, name, detail?, onChoose }]。「やめる」・窓の外・Esc で閉じる
 function openAdoptDialog({ title, summary = [], note, heading, choices, onCancel, cancelLabel = "やめる", focusCancel = false }) {
   const overlay = document.createElement("div");
@@ -5302,7 +5299,7 @@ function createAdoptAsOwnedButton(target, bonusIds, completedRolls) {
     openAdoptDialog({
       title: `${completedRolls}回先の復元ボーナスを手持ち武器に反映`,
       summary: [...createWeaponBadge(target), createCompactBonusSet(target, bonusIds)],
-      note: "選ぶと、その武器の今の復元ボーナスを書き換え（または新しく登録し）、復元ボーナスカウンターの0地点もこの回まで進めます。",
+      note: "武器を選ぶと、復元ボーナスとカウンターの変更内容を確認する画面が開きます。最終確認で反映すると、手持ち武器の更新と0地点の変更をまとめて保存します。",
       heading: sameKind.length > 0
         ? "どの武器の復元ボーナスを上書きしますか？（同じ武器種・属性の手持ち武器）"
         : "同じ武器種・属性の手持ち武器はありません。新しく登録します。",
@@ -5324,41 +5321,20 @@ function createAdoptAsOwnedButton(target, bonusIds, completedRolls) {
 }
 
 // リセットの当たりを採用：選んだ手持ち武器の復元ボーナスを上書きして、0地点を進める
-async function adoptResetToOwned(weapon, bonusIds, completedRolls) {
-  weapon.bonuses = [...bonusIds];
-  weapon.categories = bonusIds.map(bonusCategoryId);
-  onOwnedWeaponsChanged();
-  await adoptBonusPosition(completedRolls);
-  bonusStateMessage.textContent = `${completedRolls}回先の結果を採用して0地点を進め、「${comparisonTargetName(weapon)}」の復元ボーナスを ${ownedLayoutText(weapon)} に上書きしました。`;
+function adoptResetToOwned(weapon, bonusIds, completedRolls) {
+  return adoptOwnedUpdate(weapon,bonusIds,completedRolls);
 }
 
 // リセットの当たりを採用：激化タイプを選んで新しい手持ち武器として登録し、0地点を進める
-async function adoptResetAsNewOwned(target, boost, bonusIds, completedRolls) {
-  hideComparisonError();
-  if (ownedWeapons.length >= MAX_OWNED_WEAPONS) {
-    showComparisonError(`手持ち武器は最大${MAX_OWNED_WEAPONS}本です。不要な武器を削除してください。`);
-    return;
-  }
-  const attribute = optionName(ATTRIBUTES, target.attributeForce).replace("属性", "");
-  const subtype = ownedSubtypeFor(target.weaponType, target.attributeForce, boost);
-  const weapon = {
-    id: createTargetId(),
-    label: boost ? `【${boost}】${subtype ? `${subtype} ` : ""}${attribute}` : "",
-    weaponType: target.weaponType,
-    attributeForce: target.attributeForce,
-    boost,
-    subtype,
-    seriesIndex: null,
-    groupIndex: null,
-    bonuses: [...bonusIds],
-    categories: bonusIds.map(bonusCategoryId),
-    rule: "upgrade",
-    minEx: 2,
-  };
-  ownedWeapons.push(weapon);
-  onOwnedWeaponsChanged();
-  await adoptBonusPosition(completedRolls);
-  bonusStateMessage.textContent = `${completedRolls}回先の結果を採用して0地点を進め、「${comparisonTargetName(weapon)}」を手持ち武器（${ownedLayoutText(weapon)}）として登録しました。`;
+function adoptResetAsNewOwned(target, boost, bonusIds, completedRolls) {
+  return runCounterChange({kind:'bonus',steps:completedRolls,title:'復元結果を手持ち武器【巨戟】に登録しますか？',
+    summary:operationWeaponPreview({target:{...target,boost},bonuses:bonusIds}),
+    change:model=>{
+      if(model.ownedWeapons.length>=MAX_OWNED_WEAPONS)throw new Error('手持ち武器【巨戟】が上限です。整理してから登録してください。');
+      validateBonuses(target.weaponType,target.attributeForce,bonusIds);
+      model.ownedWeapons.push(newPredictionOwnedWeapon(target,boost,{bonuses:bonusIds}));
+    },
+    success:skillBoostLabel(target,boost)+'を手持ち武器【巨戟】に登録し、復元カウンターを更新しました。',confirmLabel:'登録してカウンターを進める'});
 }
 
 function createAdoptOwnedUpdateButton(target, bonusIds, completedRolls) {
@@ -5395,7 +5371,7 @@ function createAdoptOwnedUpdateButton(target, bonusIds, completedRolls) {
       title: `${completedRolls}回先の復元ボーナスで手持ち武器を更新`,
       summary: [flow],
       note: `「${comparisonTargetName(weapon)}」の今のボーナスを書き換えて、復元ボーナスカウンターの0地点を${completedRolls}回先まで進めます。`,
-      heading: "反映してよいですか？",
+      heading: "武器を選ぶと、上書き内容とカウンターの最終確認が開きます。",
       choices: [{
         tag: "手持ち武器",
         name: `${comparisonTargetName(weapon)} を更新する`,
@@ -5501,14 +5477,17 @@ function createWeaponStatEditor(weapon, onSaved) {
 }
 
 // 同じ構成の結果を採用：手持ち武器の今のボーナスを更新して、0地点を進める
-async function adoptOwnedUpdate(target, bonusIds, completedRolls) {
-  const weapon = ownedWeapons.find((candidate) => candidate.id === target.id);
-  if (!weapon) return;
-  weapon.bonuses = [...bonusIds];
-  weapon.categories = bonusIds.map(bonusCategoryId);
-  onOwnedWeaponsChanged();
-  await adoptBonusPosition(completedRolls);
-  bonusStateMessage.textContent = `${completedRolls}回先の結果を採用して0地点を進め、「${comparisonTargetName(weapon)}」を ${ownedLayoutText(weapon)} に更新しました。`;
+function adoptOwnedUpdate(target, bonusIds, completedRolls) {
+  const weapon = ownedWeapons.find(w=>w.id===target.id);
+  if(!weapon) return performConfirmedOperation(()=>{throw new Error('対象の武器が見つかりません。予測を開き直してください。');});
+  return runCounterChange({kind:'bonus',steps:completedRolls,title:'この武器の復元ボーナスを上書きしますか？',
+    summary:[...operationWeaponPreview({target:weapon,weapon,bonuses:bonusIds}),createWeaponStatComparison(weapon,bonusIds)],
+    change:model=>{
+      const owned=model.ownedWeapons.find(w=>w.id===target.id);
+      if(!owned)throw new Error('対象の武器が見つかりません。');
+      validateBonuses(owned.weaponType,owned.attributeForce,bonusIds);
+      owned.bonuses=[...bonusIds];owned.categories=bonusIds.map(bonusCategoryId);
+    },success:comparisonTargetName(weapon)+'の復元ボーナスを手持ち武器【巨戟】に反映し、復元カウンターを更新しました。',confirmLabel:'上書きしてカウンターを進める'});
 }
 
 // 1〜5枠目の今のボーナス（II・III・EXまで）をカードで選ぶ欄。その武器で出ないボーナスは外す
@@ -6960,44 +6939,12 @@ function createSkillBoostCoverage(target, roll) {
 }
 
 // 武器を選んだあと、スキルとカウンターの変更を確定する前に確認する。
-function confirmSkillAdoption({ target, weapon = null, boost = "", roll, completedRolls, onConfirm, onCancel }) {
-  const before = saveState.skillCounter;
-  const after = before === null ? null : before + completedRolls;
-  if (saveState.baseSeed === null || before === null || !Number.isInteger(completedRolls) || completedRolls < 1 || !isValidCounter(after)) {
-    showSkillTargetError("スキルカウンターを確認してから、予測結果を開き直してください。");
-    return;
-  }
-  const origin = JSON.stringify(saveState);
-  const ownedBefore = JSON.stringify(ownedWeapons);
-  const storageBefore = JSON.stringify([localStorage.getItem(STORAGE_KEY), localStorage.getItem(OWNED_WEAPONS_KEY)]);
-  const flow = document.createElement("div");
-  flow.className = "adopt-flow";
-  const label = (value) => Object.assign(document.createElement("span"), { className: "adopt-flow-label", textContent: value });
-  const row = (...children) => { const el = document.createElement("div"); el.className = "adopt-flow-row"; el.append(...children); return el; };
-  const name = weapon ? `${weaponAndAttributeText(weapon)}（${weapon.boost || "激化未設定"}） ${comparisonTargetName(weapon)}` : skillBoostLabel(target, boost);
-  flow.append(row(Object.assign(document.createElement("strong"), { textContent: name })));
-  if (weapon) flow.append(row(label("今のスキル"), createOwnedSummarySkills(weapon)));
-  flow.append(row(label(weapon ? "上書き後のスキル" : "登録するスキル"), createOwnedSummarySkills(roll)));
-  const counter = document.createElement("strong");
-  counter.textContent = `スキルカウンターが${completedRolls.toLocaleString("ja-JP")}進みます：${before.toLocaleString("ja-JP")} → ${after.toLocaleString("ja-JP")}`;
-  flow.append(row(counter));
-  openAdoptDialog({
-    title: weapon ? "この武器のスキルを上書きしますか？" : "新しい手持ち武器として登録しますか？",
-    summary: [flow],
-    note: "ゲーム内で、この回まで進めてスキルを確定・セーブした場合に反映してください。復元ボーナスカウンターは変わりません。",
-    heading: "内容を確認してから反映してください。",
-    choices: [{
-      name: weapon ? "上書きしてカウンターを進める" : "登録してカウンターを進める",
-      onChoose: () => {
-        if (JSON.stringify(saveState) !== origin || JSON.stringify(ownedWeapons) !== ownedBefore || JSON.stringify([localStorage.getItem(STORAGE_KEY), localStorage.getItem(OWNED_WEAPONS_KEY)]) !== storageBefore) {
-          showSkillTargetError("確認中にカウンターか手持ち武器が変わりました。最新の状態で予測を開き直してください。");
-          return;
-        }
-        return onConfirm();
-      },
-    }],
-    onCancel, cancelLabel: "戻る", focusCancel: true,
-  });
+function newPredictionOwnedWeapon(target, boost, {skills = {}, bonuses = null} = {}) {
+  const subtype=ownedSubtypeFor(target.weaponType,target.attributeForce,boost);
+  return {id:createTargetId(),label:boost?ownedWeaponAutoName({...target,boost,subtype}).slice(0,24):'',
+    weaponType:target.weaponType,attributeForce:target.attributeForce,boost,subtype,
+    seriesIndex:skills.seriesIndex??null,groupIndex:skills.groupIndex??null,
+    bonuses:bonuses?[...bonuses]:[null,null,null,null,null],categories:bonuses?bonuses.map(bonusCategoryId):[null,null,null,null,null],rule:'upgrade',minEx:2};
 }
 
 // スキルの当たりを採用するボタン。武器選択→最終確認→反映の順に進める。
@@ -7011,6 +6958,7 @@ function createSkillAdoptButton(target, roll, completedRolls) {
   button.title = "このスキルを採用してセーブしたものとしてスキルカウンターの0地点を進め、手持ち武器に反映します";
   // 表の中に出すと下の行（左に固定した一致列）の後ろに隠れるので、画面の真ん中に出す窓にする
   button.addEventListener("click", () => {
+    const basis = workbenchRead();
     const sameKind = ownedWeapons.filter((weapon) =>
       weapon.weaponType === target.weaponType && weapon.attributeForce === target.attributeForce);
     openAdoptDialog({
@@ -7026,11 +6974,11 @@ function createSkillAdoptButton(target, roll, completedRolls) {
           tag: "上書き",
           name: comparisonTargetName(weapon),
           detail: ownedWeaponDetailNode(weapon),
-          onChoose: () => confirmSkillAdoption({ target, weapon, roll, completedRolls, onConfirm: () => adoptSkillToOwned(weapon, roll, completedRolls), onCancel: () => button.click() }),
+          onChoose: () => adoptSkillToOwned(weapon, roll, completedRolls, basis, () => button.click()),
         })),
         ...OWNED_BOOST_OPTIONS.map(([boost]) => ({
           name: `＋ 新しい手持ち武器として登録：${skillBoostLabel(target, boost)}`,
-          onChoose: () => confirmSkillAdoption({ target, boost, roll, completedRolls, onConfirm: () => adoptSkillAsNewOwned(target, boost, roll, completedRolls), onCancel: () => button.click() }),
+          onChoose: () => adoptSkillAsNewOwned(target, boost, roll, completedRolls, basis, () => button.click()),
         })),
       ],
     });
@@ -7039,36 +6987,25 @@ function createSkillAdoptButton(target, roll, completedRolls) {
   return wrap;
 }
 
-async function adoptSkillToOwned(weapon, roll, completedRolls) {
-  weapon.seriesIndex = roll.seriesIndex;
-  weapon.groupIndex = roll.groupIndex;
-  onOwnedWeaponsChanged();
-  await adoptSkillPosition(completedRolls);
+function adoptSkillToOwned(weapon, roll, completedRolls, expected, onCancel) {
+  return runCounterChange({kind:'skill',steps:completedRolls,title:'この武器のスキルを上書きしますか？',expected,onCancel,
+    summary:operationWeaponPreview({target:weapon,weapon,skills:roll}),
+    change:model=>{
+      const owned=model.ownedWeapons.find(w=>w.id===weapon.id);
+      if(!owned)throw new Error('対象の武器が見つかりません。');
+      if(!Number.isInteger(roll.seriesIndex)||!SERIES_SKILLS[roll.seriesIndex]||!Number.isInteger(roll.groupIndex)||!GROUP_SKILLS[roll.groupIndex])throw new Error('スキルの指定を確認してください。');
+      owned.seriesIndex=roll.seriesIndex;owned.groupIndex=roll.groupIndex;
+    },success:comparisonTargetName(weapon)+'のスキルを '+ownedSkillText(roll)+' に反映し、スキルカウンターを更新しました。',confirmLabel:'上書きしてカウンターを進める'});
 }
 
-async function adoptSkillAsNewOwned(target, boost, roll, completedRolls) {
-  if (ownedWeapons.length >= MAX_OWNED_WEAPONS) {
-    showSkillTargetError(`手持ち武器は最大${MAX_OWNED_WEAPONS}本です。不要な武器を削除してください。`);
-    return;
-  }
-  const attribute = optionName(ATTRIBUTES, target.attributeForce).replace("属性", "");
-  const subtype = ownedSubtypeFor(target.weaponType, target.attributeForce, boost);
-  ownedWeapons.push({
-    id: createTargetId(),
-    label: boost ? `【${boost}】${subtype ? `${subtype} ` : ""}${attribute}` : "",
-    weaponType: target.weaponType,
-    attributeForce: target.attributeForce,
-    boost,
-    subtype,
-    seriesIndex: roll.seriesIndex,
-    groupIndex: roll.groupIndex,
-    bonuses: [null, null, null, null, null],
-    categories: [null, null, null, null, null],
-    rule: "upgrade",
-    minEx: 2,
-  });
-  onOwnedWeaponsChanged();
-  await adoptSkillPosition(completedRolls);
+function adoptSkillAsNewOwned(target, boost, roll, completedRolls, expected, onCancel) {
+  return runCounterChange({kind:'skill',steps:completedRolls,title:'新しい手持ち武器として登録しますか？',expected,onCancel,
+    summary:operationWeaponPreview({target:{...target,boost},skills:roll}),
+    change:model=>{
+      if(model.ownedWeapons.length>=MAX_OWNED_WEAPONS)throw new Error('手持ち武器【巨戟】が上限です。整理してから登録してください。');
+      if(!Number.isInteger(roll.seriesIndex)||!SERIES_SKILLS[roll.seriesIndex]||!Number.isInteger(roll.groupIndex)||!GROUP_SKILLS[roll.groupIndex])throw new Error('スキルの指定を確認してください。');
+      model.ownedWeapons.push(newPredictionOwnedWeapon(target,boost,{skills:roll}));
+    },success:skillBoostLabel(target,boost)+'を '+ownedSkillText(roll)+' で手持ち武器【巨戟】に登録し、スキルカウンターを更新しました。',confirmLabel:'登録してカウンターを進める'});
 }
 
 function createSkillResultPair(roll, conditionMatch) {
@@ -7345,27 +7282,13 @@ function renderArtianWeaponVerification() {
 }
 
 function applyArtianBaseCounter() {
-  hideArtianBaseError();
-  if (saveState.baseSeed === null) {
-    showArtianBaseError("基準seedを先に特定するか、上部の現在のセーブ状態から手入力してください。");
-    return;
-  }
-  const counter = Number(artianBaseCounterInput.value);
-  if (!Number.isSafeInteger(counter) || counter < 0 || counter > 1_000_000) {
-    showArtianBaseError("現在の作成カウンターは0〜1,000,000の整数で入力してください。");
-    return;
-  }
-  syncArtianBaseSeed();
-  const key = artianBaseCounterKey();
-  artianBaseState.counters[key] = counter;
-  artianBaseState.sources[key] = "手入力";
-  persistAppState();
-  renderArtianBaseState();
-  const weaponName = optionName(WEAPON_TYPES, Number(artianBaseWeaponSelect.value));
-  showSavedCounters([
-    `${weaponName}の作成カウンター ${counter.toLocaleString("ja-JP")} を保存しました。`,
-  ]);
-  refreshArtianBasePredictions();
+  const weaponType=Number(artianBaseWeaponSelect.value);
+  return runCounterSetting('通常作成カウンターを入力した値に設定しますか？',model=>{
+    if(model.saveState.baseSeed===null)throw new Error('先に基準seedを設定してください。');
+    const counter=readStateNumber(artianBaseCounterInput,'通常作成カウンター',1000000);
+    if(model.artianBaseState.baseSeed!==model.saveState.baseSeed)model.artianBaseState={baseSeed:model.saveState.baseSeed,counters:{},sources:{}};
+    const key=artianBaseCounterKey(weaponType);model.artianBaseState.counters[key]=counter;model.artianBaseState.sources[key]='手入力';
+  },{tab:'artian-future',normalType:weaponType});
 }
 
 function refreshArtianBasePredictions() {
@@ -7563,7 +7486,7 @@ function createArtianAdoptButton(weaponType, attr, completedCreations, bonusIds)
     openAdoptDialog({
       title: `${completedCreations}本先の通常アーティアを手持ち武器に登録`,
       summary: [badge, tags],
-      note: `作成カウンターの0地点を${completedCreations}本先まで進めて、この武器を「手持ち武器【通常】」に登録します。${attr === 1 ? "作るときに決めた属性を選んでください。" : ""}`,
+      note: `選ぶと最終確認が開きます。反映すると、作成カウンターの0地点を${completedCreations}本先まで進め、この武器を「手持ち武器【通常】」に登録します。${attr === 1 ? "作るときに決めた属性を選んでください。" : ""}`,
       heading: held.length > 0 ? `この系統の組み合わせは、${artianHeldText(held)}。` : "どれで登録しますか？",
       choices: elements.map((element) => {
         const target = { weaponType, attr, element: attr === 1 ? element : null };
@@ -7581,46 +7504,20 @@ function createArtianAdoptButton(weaponType, attr, completedCreations, bonusIds)
 }
 
 function adoptArtianAndRegister(weaponType, attr, element, completedCreations, bonusIds) {
-  const counter = artianBaseCounterForWeapon(weaponType);
-  if (counter === null) return;
-  const nextCounter = counter + completedCreations;
-  if (nextCounter > 1_000_000) return;
-  const weaponName = optionName(WEAPON_TYPES, weaponType);
-  const registered = artianOwned.length < MAX_ARTIAN_OWNED;
-  const key = artianBaseCounterKey(weaponType);
-  artianBaseState.counters[key] = nextCounter;
-  artianBaseState.sources[key] = "予測結果";
-  persistAppState();
-  if (registered) {
-    artianOwned.push({ id: createTargetId(), label: "", weaponType, attr, element, ids: [...bonusIds] });
-    artianOwnedUi.message = `${artianOwnedWeaponText({ weaponType, attr, element })}を登録しました。`;
-  }
-  renderArtianBaseState();
-  showSavedCounters([
-    `${weaponName}の作成カウンター ${nextCounter.toLocaleString("ja-JP")} を保存しました。`,
-    registered ? "手持ち武器【通常】に登録しました。" : `手持ち武器【通常】が最大${MAX_ARTIAN_OWNED}本のため、登録はしていません。`,
-  ]);
-  refreshArtianBasePredictions();
-  onArtianOwnedChanged();
+  const target={weaponType,attributeForce:attr===0?0:element};
+  return runCounterChange({kind:'normal',weaponType,steps:completedCreations,title:'この通常アーティアを手持ち武器に登録しますか？',
+    summary:operationWeaponPreview({target,bonuses:bonusIds,normal:true}),
+    change:model=>{
+      if(model.normalOwned.length>=MAX_ARTIAN_OWNED)throw new Error('手持ち武器【通常】が上限です。カウンターも進めていません。整理してから登録してください。');
+      validateNormal(weaponType,target.attributeForce,bonusIds);
+      model.normalOwned.push({id:createTargetId(),label:'',weaponType,attr,element:attr===0?null:element,ids:[...bonusIds]});
+    },success:artianOwnedWeaponText({weaponType,attr,element})+'を手持ち武器【通常】に登録し、この武器種の作成カウンターを更新しました。',confirmLabel:'登録してカウンターを進める'});
 }
 
 function adoptArtianBasePosition(completedCreations) {
-  const counter = currentArtianBaseCounter();
-  if (counter === null) return;
-  const nextCounter = counter + completedCreations;
-  if (nextCounter > 1_000_000) return;
-  const key = artianBaseCounterKey();
-  artianBaseState.counters[key] = nextCounter;
-  artianBaseState.sources[key] = "予測結果";
-  persistAppState();
-  renderArtianBaseState();
-  artianSearchMessage.textContent = `作成カウンター${nextCounter.toLocaleString("ja-JP")}を新しい0地点にしました。`;
-  const weaponName = optionName(WEAPON_TYPES, Number(artianBaseWeaponSelect.value));
-  showSavedCounters([
-    `${weaponName}の作成カウンター ${nextCounter.toLocaleString("ja-JP")} を保存しました。`,
-  ]);
-  refreshArtianBasePredictions();
-  setActiveTab("artian-future");
+  const weaponType=Number(artianBaseWeaponSelect.value);
+  return runCounterChange({kind:'normal',weaponType,steps:completedCreations,title:'通常作成カウンターを進めますか？',
+    success:optionName(WEAPON_TYPES,weaponType)+'の通常作成カウンターを更新しました。手持ち武器は変更していません。'});
 }
 
 function snapshotArtianObservationValues() {
@@ -8629,6 +8526,42 @@ function workbenchPreferences() {
 function saveWorkbenchPreferences(settings) {
   localStorage.setItem(WORKBENCH_KEY, JSON.stringify({ ...workbenchPreferences(), ...settings, version: 1 }));
 }
+function commitWorkbenchWithFeedback(action, expected, settings) {
+  return performConfirmedOperation(() => {
+    assertOperationBasis(expected);
+    let preview;
+    if (action.type === 'undo') {
+      const previous = workbenchPreferences().last;
+      if (!previous?.before || previous.afterSignature !== stateSignature(expected.model)) throw new Error('直前の記録後にデータが変わったため取り消せません。');
+      preview = {state:previous.before,selected:previous.selectedBefore??null};
+    } else preview = transition(expected.model,action);
+    const oldWeapon = expected.model.ownedWeapons.find(w=>w.id===action.weaponId);
+    const normal = preview.selected?.kind === 'normal';
+    const nextWeapon = (normal?preview.state.normalOwned:preview.state.ownedWeapons).find(w=>w.id===preview.selected?.id);
+    const titles = {
+      create:'通常アーティアの作成を記録しますか？', upgrade:'巨戟化して手持ち武器【巨戟】に反映しますか？',
+      restore:'復元結果を手持ち武器に反映しますか？', undo:'直前の記録を取り消して元に戻しますか？',
+      'correct-normal':'通常ボーナスの修正を保存しますか？', 'correct-skills':'現在のスキルを修正しますか？', 'correct-bonuses':'現在の復元ボーナスを修正しますか？',
+    };
+    const target = nextWeapon ? {...nextWeapon,attributeForce:normal?(nextWeapon.attr===0?0:nextWeapon.element):nextWeapon.attributeForce} : null;
+    const summary = target ? operationWeaponPreview({target,weapon:oldWeapon,
+      skills:!normal&&['upgrade','correct-skills','undo'].includes(action.type)?nextWeapon:null,
+      bonuses:normal?nextWeapon.ids:['restore','correct-bonuses','undo'].includes(action.type)&&ownedBonusesKnown(nextWeapon)?nextWeapon.bonuses:null,normal}) : [];
+    if(action.type==='restore'&&oldWeapon)summary.push(createWeaponStatComparison(oldWeapon,action.bonuses));
+    const inventory = action.type==='create'?'手持ち武器【通常】に1本登録します。':action.type==='upgrade'?'この1本を手持ち武器【通常】から外し、手持ち武器【巨戟】へ移します。'
+      :action.type==='undo'?'カウンターと手持ち武器を、直前の記録前の状態に戻します。ゲーム内でも操作を取り消した場合だけ使ってください。'
+      :'選んだ武器の登録内容を上書きします。';
+    const unknown = (action.type==='create'&&normalCounter(expected.model,action.weaponType)===null)||(action.type==='upgrade'&&expected.model.saveState.skillCounter===null)||(action.type==='restore'&&expected.model.saveState.bonusCounter===null);
+    const weaponName = target ? weaponAndAttributeText(target)+(target.label?'「'+target.label+'」':'')+'：' : '';
+    return {title:titles[action.type]??'変更を反映しますか？',summary,
+      message:inventory+(unknown?' 対応するカウンターは未特定のままです。現在位置は特定タブで確認してください。':''),
+      lines:counterChangeMessages(expected.model,preview.state,WEAPON_TYPES,action.type==='create'?action.weaponType:null),
+      confirmLabel:action.type==='undo'?'直前の状態に戻す':'手持ち武器に反映する',
+      verify:()=>assertOperationBasis(expected),execute:()=>commitWorkbench(action,expected,settings),
+      success:result=>weaponName+result.message+(unknown?' 対応するカウンターは未特定のままです。':'')+(result.renderWarning?' '+result.renderWarning:''),
+    };
+  });
+}
 async function commitWorkbench(action, expected, settings) {
   const current = workbenchRead();
   if (current.stamp !== expected.stamp || stateSignature(current.model) !== stateSignature(expected.model)) {
@@ -8655,14 +8588,18 @@ async function commitWorkbench(action, expected, settings) {
     [WORKBENCH_KEY]:JSON.stringify(nextSettings),
   });
   saveState=model.saveState; artianBaseState=model.artianBaseState; artianOwned=model.normalOwned; ownedWeapons=model.ownedWeapons;
-  syncRuntimeFromSaveState(); renderSaveState(); renderArtianOwnedTab(); renderOwnedWeaponSection();
-  refreshArtianBasePredictions();
-  void refreshPredictions(); void refreshComparisonPredictions(); void refreshSkillPredictions();
-  return { ...result, preferences: nextSettings };
+  let renderWarning = '';
+  try {
+    syncRuntimeFromSaveState(); renderSaveState(); renderArtianOwnedTab(); renderOwnedWeaponSection();
+    const refreshed = await Promise.allSettled([refreshArtianBasePredictions(),refreshPredictions(),refreshComparisonPredictions(),refreshSkillPredictions()]);
+    if (refreshed.some(item=>item.status==='rejected')) renderWarning = '一部の予測を更新できませんでした。保存は完了しています。画面を開き直して確認してください。';
+    showSaveFeedback(result.message,[]);
+  } catch { renderWarning = '保存は完了しています。画面を開き直して内容を確認してください。'; }
+  return { ...result, preferences: nextSettings, renderWarning };
 }
 
 creationWorkbench = mountCreationWorkbench(document.querySelector('#creation-guide'), {
-  read:workbenchRead, preferences:workbenchPreferences, savePreferences:saveWorkbenchPreferences, commit:commitWorkbench,
+  read:workbenchRead, preferences:workbenchPreferences, savePreferences:saveWorkbenchPreferences, commit:commitWorkbenchWithFeedback,
   watchedKeys:[STORAGE_KEY,ARTIAN_OWNED_KEY,OWNED_WEAPONS_KEY,BONUS_WISHES_KEY,BONUS_VIEW_KEY],
   weapons:WEAPON_TYPES, attributes:ATTRIBUTES, boosts:OWNED_BOOST_OPTIONS.filter(([id])=>id),
   series:SERIES_SKILLS, groups:GROUP_SKILLS,

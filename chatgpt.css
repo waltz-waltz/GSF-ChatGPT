@@ -171,6 +171,21 @@ details.owned-weapon-card > summary { display:grid; grid-template-columns:minmax
 .owned-adopt-label { color:#cbc8b4; font-size:.7rem; white-space:nowrap; }
 .owned-adopt-detail .owned-summary-skills { gap:6px; }
 .owned-adopt-detail .owned-summary-skills .skill-tag { padding:6px 10px; }
+/* カウンター操作：確認→反映中→完了まで画面を覆い、二重押しを防ぐ。 */
+.skill-adopt-overlay.operation-feedback-overlay { z-index:1100; }
+.operation-feedback-popup { width:min(720px,100%); gap:16px; }
+.operation-feedback-popup .operation-preview { display:grid; gap:12px; min-width:0; }
+.operation-feedback-popup .adopt-flow { display:flex; flex-direction:column; align-items:stretch; gap:12px; width:100%; min-width:0; }
+.operation-feedback-popup .adopt-flow .comparison-bonus-set { grid-template-columns:repeat(5,minmax(0,88px)); max-width:100%; }
+.operation-feedback-popup .owned-adopt-detail { width:100%; }
+.operation-feedback-popup .operation-message { font-size:.9rem; line-height:1.8; white-space:pre-line; overflow-wrap:anywhere; }
+.operation-feedback-popup .operation-counter-changes { display:grid; gap:10px; margin:0; padding:14px 14px 14px 32px; border:1px solid #9e8a4e; border-radius:8px; background:#25271d; font-size:.88rem; font-weight:800; line-height:1.65; }
+.operation-feedback-popup .operation-note { color:#c9c6af; line-height:1.7; }
+.operation-feedback-popup .operation-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:12px; }
+.operation-feedback-popup .operation-actions button { min-height:46px; padding:10px 18px; font-size:.9rem; font-weight:800; }
+.operation-feedback-popup .operation-actions button:focus-visible { outline:3px solid #fff3bf; outline-offset:3px; }
+.operation-feedback-popup.operation-complete { border-color:#8ed6be; }
+@media(max-width:600px) { .operation-feedback-popup .operation-actions { flex-direction:column-reverse; } .operation-feedback-popup .adopt-flow .comparison-bonus-set .bonus-tag { font-size:.75rem; } }
 .owned-summary-bonuses .bonus-tag { min-width:0; padding:4px 7px; font-size:.8rem; white-space:nowrap; }
 .owned-summary-rule { color:#cbc8b4; font-size:.76rem; line-height:1.6; }
 .owned-weapon-card > summary > .collapsible-hint { grid-column:1 / -1; grid-row:2; margin:0; }

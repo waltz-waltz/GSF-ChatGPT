@@ -30,9 +30,11 @@ export function mountCreationWorkbench(root,host) {
     const el=h('button',text,cls);el.type='button';if(id)el.id=id;
     el.addEventListener('click',async()=>{
       if(working||external)return;
-      working=true;error='';root.querySelectorAll('button').forEach(b=>b.disabled=true);
-      try{await action();}catch(e){error=e.message;}
-      finally{working=false;await render();}
+      const states=[...root.querySelectorAll('button')].map(b=>[b,b.disabled]);
+      working=true;error='';states.forEach(([b])=>b.disabled=true);
+      let cancelled=false;
+      try{cancelled=await action()===false;}catch(e){error=e.message;}
+      finally{working=false;if(cancelled){states.forEach(([b,disabled])=>b.disabled=disabled);}else await render();}
     });
     return el;
   }
@@ -81,6 +83,7 @@ export function mountCreationWorkbench(root,host) {
   const weaponText=(w,kind)=>name(host.weapons,w.weaponType)+'・'+(kind==='normal'?(w.attr===0?'無属性':w.element?name(host.attributes,w.element):'属性未設定'):name(host.attributes,w.attributeForce))+(w.label?' ｜ '+w.label:'');
   async function dispatch(action,basis) {
     const result=await host.commit(action,basis,{form,selected});
+    if(!result)return false;
     selected=result.selected;message=result.message;prefs=result.preferences;
     form={...form,...prefs.form};
     const unknown=action.type==='create'&&!isKnown(normalCounter(basis.model,action.weaponType))?'通常作成':action.type==='upgrade'&&!isKnown(basis.model.saveState.skillCounter)?'スキル':action.type==='restore'&&!isKnown(basis.model.saveState.bonusCounter)?'復元':null;
@@ -129,7 +132,7 @@ export function mountCreationWorkbench(root,host) {
     if(revision!==renderId)return;
     lastFingerprint=stateSignature(model);lastHintStamp=basis.hintStamp;
     root.replaceChildren(h('p','CREATION WORKBENCH','step'),h('h2','通常アーティア作成'),
-      h('p','ゲーム内で行った操作の直後に、対応するボタンを1回押してください。その場でカウンターと手持ち武器を更新します。予測と違う結果だった場合は、実際の結果に修正して記録できます。','prediction-intro'));
+      h('p','ゲーム内で行った操作の直後に、対応するボタンを1回押してください。確認画面で反映するとカウンターと手持ち武器を更新し、完了通知が出ます。予測と違う結果だった場合は、実際の結果に修正して記録できます。','prediction-intro'));
     if(message){const status=h('p',message,'continuation-message creation-action-message');status.setAttribute('role','status');root.append(status);}
     if(error){const p=h('p',error,'error');p.setAttribute('role','alert');root.append(p);}
     if(predictionError)root.append(h('p',predictionError,'error'));
