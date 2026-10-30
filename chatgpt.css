@@ -121,6 +121,41 @@
 .skill-missing-heading { display:block; margin:9px 0 5px; color:#ffe399; font-size:.76rem; }
 .skill-missing-candidate { margin-top:5px; padding:7px 8px; border:1px dashed #d7b957; border-radius:6px; color:#fff0bb; font-size:.73rem; line-height:1.65; overflow-wrap:anywhere; }
 .skill-coverage-complete { display:block; margin-top:8px; color:#b5e6d8; font-size:.76rem; }
+
+/* 08：条件一致だけを見るときは右の全武器列を畳み、残りの幅をカードに使う。 */
+#skill-table-wrap { max-height:none; overflow-x:auto; }
+#skill-table-wrap.skill-results-focused { overflow:visible; }
+#skill-table-wrap.skill-results-focused .skill-prediction-table { min-width:0; table-layout:fixed; }
+#skill-table-wrap.skill-results-focused .skill-prediction-table > thead > tr > th,
+#skill-table-wrap.skill-results-focused .skill-prediction-table > tbody > tr > th,
+#skill-table-wrap.skill-results-focused .skill-prediction-table > tbody > tr > td { position:static; vertical-align:top; box-shadow:none; }
+#skill-table-wrap.skill-results-focused .skill-prediction-table > thead > tr > th:nth-child(3),
+#skill-table-wrap.skill-results-focused .skill-prediction-table > tbody > tr > td:nth-child(3) { width:auto; min-width:0; }
+#skill-table-wrap.skill-results-focused .skill-match-cell { padding:16px; }
+#skill-table-wrap.skill-results-focused .skill-matches-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr)); gap:16px; align-items:start; }
+#skill-table-wrap.skill-results-focused .skill-match-item { display:grid; grid-template-columns:minmax(140px,.8fr) minmax(0,1.2fr); gap:12px 16px; margin:0; padding:16px; border:1px solid #84754c; border-radius:12px; background:#20231b; min-width:0; }
+#skill-table-wrap.skill-results-focused .skill-match-summary { min-width:0; }
+#skill-table-wrap.skill-results-focused .skill-match-name { margin-bottom:10px; white-space:normal; }
+#skill-table-wrap.skill-results-focused .skill-match-name .weapon-badge { max-width:100%; margin-right:0; overflow-wrap:anywhere; }
+#skill-table-wrap.skill-results-focused .skill-match-summary .skill-result-pair { min-width:0; }
+#skill-table-wrap.skill-results-focused .skill-boost-coverage { min-width:0; margin:0; }
+#skill-table-wrap.skill-results-focused .skill-adopt { grid-column:1 / -1; margin:0; }
+#skill-table-wrap.skill-results-focused .skill-owned-badge { max-width:100%; }
+#skill-table-wrap.skill-results-focused .skill-missing-candidate { font-size:.77rem; }
+#skill-table-wrap.skill-results-focused .saved-state-cell { padding-top:20px; }
+@media(max-width:700px) {
+  #skill-table-wrap.skill-results-focused .skill-prediction-table,
+  #skill-table-wrap.skill-results-focused .skill-prediction-table > tbody { display:block; }
+  #skill-table-wrap.skill-results-focused .skill-prediction-table > thead { display:none; }
+  #skill-table-wrap.skill-results-focused .skill-prediction-table > tbody > tr { display:grid; grid-template-columns:80px minmax(0,1fr); }
+  #skill-table-wrap.skill-results-focused .skill-prediction-table > tbody > tr + tr { border-top:4px solid #b6ad91; }
+  #skill-table-wrap.skill-results-focused .skill-prediction-table > tbody > tr > th,
+  #skill-table-wrap.skill-results-focused .skill-prediction-table > tbody > tr > td { width:auto; min-width:0; max-width:none; border-top:0; border-bottom:0; }
+  #skill-table-wrap.skill-results-focused .skill-prediction-table > tbody > tr > .skill-match-cell,
+  #skill-table-wrap.skill-results-focused .prediction-empty { grid-column:1 / -1; }
+  #skill-table-wrap.skill-results-focused .skill-match-cell { padding:8px; }
+  #skill-table-wrap.skill-results-focused .skill-match-item { grid-template-columns:minmax(0,1fr); padding:12px; }
+}
 /* 武器の前後比較。↑↓・符号も付け、色だけで増減を区別しない。 */
 .weapon-stat-inline { display:flex; flex-wrap:wrap; gap:4px 12px; margin:8px 0 5px; padding-top:7px; border-top:1px solid #62644e; font-size:.76rem; font-variant-numeric:tabular-nums; }
 .weapon-stat-inline > span { display:block; font-weight:800; }

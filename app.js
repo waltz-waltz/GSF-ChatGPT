@@ -6690,6 +6690,7 @@ function renderSkillPredictionTable() {
 
   const skillFilter = selectedSkillFilter();
   const highlightEnabled = skillHighlightEnabled.checked;
+  skillTableWrap.classList.toggle("skill-results-focused", skillFilter.enabled);
   const { count, matchingRowCount, visibleIndices } = skillPredictionVisibility(skillFilter);
   const conditionMatchCount = skillPredictionRollSets.reduce((total, target) => {
     const targetFilter = skillFilterForTarget(skillFilter, target);
@@ -6715,23 +6716,23 @@ function renderSkillPredictionTable() {
   stateHeader.textContent = "保存後の状態";
   const matchHeader = document.createElement("th");
   matchHeader.scope = "col";
-  matchHeader.textContent = "一致";
+  matchHeader.textContent = skillFilter.enabled ? "条件に一致した武器" : "一致";
   skillPredictionHeaderRow.replaceChildren(
     offsetHeader,
     stateHeader,
     matchHeader,
-    ...skillPredictionRollSets.map((target) => {
+    ...(skillFilter.enabled ? [] : skillPredictionRollSets.map((target) => {
       const header = document.createElement("th");
       header.scope = "col";
       header.textContent = comparisonTargetName(target);
       return header;
-    }),
+    })),
   );
 
   if (visibleIndices.length === 0) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 3 + skillPredictionRollSets.length;
+    cell.colSpan = skillFilter.enabled ? 3 : 3 + skillPredictionRollSets.length;
     cell.className = "prediction-empty";
     cell.textContent = "指定したグループ・シリーズ条件に合う結果は表示範囲内にありません。表示回数を増やすか条件を変更してください。";
     row.append(cell);
@@ -6792,36 +6793,45 @@ function createSkillPredictionRow(index, skillFilter, highlightEnabled) {
   // 条件に一致した武器を左側の「一致」列にまとめる
   const matchCell = document.createElement("td");
   matchCell.className = "skill-match-cell";
+  const matches = document.createElement("div");
+  matches.className = "skill-matches-grid";
   row.append(matchCell);
 
   for (const target of skillPredictionRollSets) {
     const roll = target.rolls[index];
-    const cell = document.createElement("td");
-    const conditionMatch = highlightEnabled && skillRollMatchesFilter(roll, skillFilterForTarget(skillFilter, target));
-    cell.append(createSkillResultPair(roll, conditionMatch));
-    // 各武器の列では所持済みを表示し、一致列には未所持の激化候補も添える。
-    const holdersBadge = createOwnedSkillBadge(target, roll);
-    if (holdersBadge) cell.append(holdersBadge);
-    row.append(cell);
+    // 一致の判定を色の強調から独立させ、強調OFFでも一致カードを残す。
+    const conditionMatch = skillRollMatchesFilter(roll, skillFilterForTarget(skillFilter, target));
+    if (!skillFilter.enabled) {
+      const cell = document.createElement("td");
+      cell.append(createSkillResultPair(roll, conditionMatch && highlightEnabled));
+      const holdersBadge = createOwnedSkillBadge(target, roll);
+      if (holdersBadge) cell.append(holdersBadge);
+      row.append(cell);
+    }
 
     if (conditionMatch) {
       const item = document.createElement("div");
       const name = document.createElement("div");
+      const summary = document.createElement("div");
       item.className = "skill-match-item";
+      summary.className = "skill-match-summary";
       name.className = "skill-match-name";
       name.append(...createWeaponBadge(target));
-      item.append(name, createSkillResultPair(roll, true));
+      summary.append(name, createSkillResultPair(roll, highlightEnabled));
+      item.append(summary);
       item.append(createSkillBoostCoverage(target, roll));
       item.append(createSkillAdoptButton(target, roll, index + 1));
-      matchCell.append(item);
+      matches.append(item);
     }
   }
 
-  if (matchCell.childElementCount === 0) {
+  if (matches.childElementCount === 0) {
     const none = document.createElement("span");
     none.className = "skill-match-none";
     none.textContent = "—";
     matchCell.append(none);
+  } else {
+    matchCell.append(matches);
   }
   return row;
 }
