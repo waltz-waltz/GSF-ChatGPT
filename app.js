@@ -5176,20 +5176,21 @@ function ownedLayoutText(weapon) {
 
 // 採用するときの窓（画面の真ん中・いちばん手前）。押しただけでは何も変わらず、窓で選んだときに反映する。
 // choices: [{ tag?, name, detail?, onChoose }]。「やめる」・窓の外・Esc で閉じる
-function openAdoptDialog({ title, summary = [], note, heading, choices }) {
+function openAdoptDialog({ title, summary = [], note, heading, choices, onCancel, cancelLabel = "やめる", focusCancel = false }) {
   const overlay = document.createElement("div");
   overlay.className = "skill-adopt-overlay";
   const menu = document.createElement("div");
   menu.className = "skill-adopt-menu";
   menu.setAttribute("role", "dialog");
   menu.setAttribute("aria-modal", "true");
-  const onKey = (event) => { if (event.key === "Escape") close(); };
+  const onKey = (event) => { if (event.key === "Escape") cancelDialog(); };
   const close = () => {
     overlay.remove();
     document.removeEventListener("keydown", onKey);
   };
+  const cancelDialog = () => { close(); onCancel?.(); };
   document.addEventListener("keydown", onKey);
-  overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) cancelDialog(); });
 
   const titleEl = document.createElement("h3");
   titleEl.textContent = title;
@@ -5234,12 +5235,13 @@ function openAdoptDialog({ title, summary = [], note, heading, choices }) {
   const cancel = document.createElement("button");
   cancel.type = "button";
   cancel.className = "text-button skill-adopt-cancel";
-  cancel.textContent = "やめる";
-  cancel.addEventListener("click", close);
+  cancel.textContent = cancelLabel;
+  cancel.addEventListener("click", cancelDialog);
   menu.append(titleEl, summaryEl, noteEl, headingEl, ...buttons, cancel);
   overlay.append(menu);
   document.body.append(overlay);
-  buttons[0]?.focus();
+  if (focusCancel) cancel.focus();
+  else buttons[0]?.focus();
 }
 
 // 「弓・火・攻撃激化｜今のスキル：…｜攻EX 攻III …」（上書きする武器を見分けるための説明）
@@ -6957,7 +6959,48 @@ function createSkillBoostCoverage(target, roll) {
   return wrap;
 }
 
-// スキルの当たりを採用するボタン。押すと、どの手持ち武器に付けるか（または新しく登録するか）を選ぶ
+// 武器を選んだあと、スキルとカウンターの変更を確定する前に確認する。
+function confirmSkillAdoption({ target, weapon = null, boost = "", roll, completedRolls, onConfirm, onCancel }) {
+  const before = saveState.skillCounter;
+  const after = before === null ? null : before + completedRolls;
+  if (saveState.baseSeed === null || before === null || !Number.isInteger(completedRolls) || completedRolls < 1 || !isValidCounter(after)) {
+    showSkillTargetError("スキルカウンターを確認してから、予測結果を開き直してください。");
+    return;
+  }
+  const origin = JSON.stringify(saveState);
+  const ownedBefore = JSON.stringify(ownedWeapons);
+  const storageBefore = JSON.stringify([localStorage.getItem(STORAGE_KEY), localStorage.getItem(OWNED_WEAPONS_KEY)]);
+  const flow = document.createElement("div");
+  flow.className = "adopt-flow";
+  const label = (value) => Object.assign(document.createElement("span"), { className: "adopt-flow-label", textContent: value });
+  const row = (...children) => { const el = document.createElement("div"); el.className = "adopt-flow-row"; el.append(...children); return el; };
+  const name = weapon ? `${weaponAndAttributeText(weapon)}（${weapon.boost || "激化未設定"}） ${comparisonTargetName(weapon)}` : skillBoostLabel(target, boost);
+  flow.append(row(Object.assign(document.createElement("strong"), { textContent: name })));
+  if (weapon) flow.append(row(label("今のスキル"), createOwnedSummarySkills(weapon)));
+  flow.append(row(label(weapon ? "上書き後のスキル" : "登録するスキル"), createOwnedSummarySkills(roll)));
+  const counter = document.createElement("strong");
+  counter.textContent = `スキルカウンターが${completedRolls.toLocaleString("ja-JP")}進みます：${before.toLocaleString("ja-JP")} → ${after.toLocaleString("ja-JP")}`;
+  flow.append(row(counter));
+  openAdoptDialog({
+    title: weapon ? "この武器のスキルを上書きしますか？" : "新しい手持ち武器として登録しますか？",
+    summary: [flow],
+    note: "ゲーム内で、この回まで進めてスキルを確定・セーブした場合に反映してください。復元ボーナスカウンターは変わりません。",
+    heading: "内容を確認してから反映してください。",
+    choices: [{
+      name: weapon ? "上書きしてカウンターを進める" : "登録してカウンターを進める",
+      onChoose: () => {
+        if (JSON.stringify(saveState) !== origin || JSON.stringify(ownedWeapons) !== ownedBefore || JSON.stringify([localStorage.getItem(STORAGE_KEY), localStorage.getItem(OWNED_WEAPONS_KEY)]) !== storageBefore) {
+          showSkillTargetError("確認中にカウンターか手持ち武器が変わりました。最新の状態で予測を開き直してください。");
+          return;
+        }
+        return onConfirm();
+      },
+    }],
+    onCancel, cancelLabel: "戻る", focusCancel: true,
+  });
+}
+
+// スキルの当たりを採用するボタン。武器選択→最終確認→反映の順に進める。
 function createSkillAdoptButton(target, roll, completedRolls) {
   const wrap = document.createElement("div");
   wrap.className = "skill-adopt";
@@ -6973,7 +7016,7 @@ function createSkillAdoptButton(target, roll, completedRolls) {
     openAdoptDialog({
       title: `${completedRolls}回先のスキルを手持ち武器に反映`,
       summary: [...createWeaponBadge(target), createSkillResultPair(roll, true)],
-      note: "選ぶと、その武器のスキルを書き換え（または新しく登録し）、スキルカウンターの0地点もこの回まで進めます。",
+      note: "武器を選ぶと、上書きするスキルとカウンターの変更内容を確認する画面が開きます。確認して反映すると、スキルカウンターの0地点もこの回まで進めます。",
       heading: sameKind.length > 0
         ? "どの武器のスキルを上書きしますか？（同じ武器種・属性の手持ち武器）"
         : "同じ武器種・属性の手持ち武器はありません。新しく登録します。",
@@ -6983,11 +7026,11 @@ function createSkillAdoptButton(target, roll, completedRolls) {
           tag: "上書き",
           name: comparisonTargetName(weapon),
           detail: ownedWeaponDetailNode(weapon),
-          onChoose: () => adoptSkillToOwned(weapon, roll, completedRolls),
+          onChoose: () => confirmSkillAdoption({ target, weapon, roll, completedRolls, onConfirm: () => adoptSkillToOwned(weapon, roll, completedRolls), onCancel: () => button.click() }),
         })),
         ...OWNED_BOOST_OPTIONS.map(([boost]) => ({
           name: `＋ 新しい手持ち武器として登録：${skillBoostLabel(target, boost)}`,
-          onChoose: () => adoptSkillAsNewOwned(target, boost, roll, completedRolls),
+          onChoose: () => confirmSkillAdoption({ target, boost, roll, completedRolls, onConfirm: () => adoptSkillAsNewOwned(target, boost, roll, completedRolls), onCancel: () => button.click() }),
         })),
       ],
     });
