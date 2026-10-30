@@ -107,6 +107,9 @@
 @media(max-width:600px) { .match-weapon-items {display:grid;grid-template-columns:minmax(0,1fr);} .comparison-table .match-weapon-items > .skill-match-item {max-width:none;} #creation-guide .creation-upcoming-list {grid-template-columns:minmax(0,1fr);} .match-weapon-heading {font-size:.95rem!important;} }
 
 /* スキル一致欄の激化別所持状況。未所持は文字と点線でも区別する。 */
+.skill-prediction-table .skill-match-name > .weapon-badge { margin-bottom:6px; padding:7px 12px; border:2px solid #ffe5a0; border-radius:7px; background:#f3d17a; color:#211b0b; font-size:.95rem; font-weight:900; line-height:1.45; letter-spacing:.02em; box-shadow:0 0 0 1px #695625; }
+.skill-prediction-table > tbody > tr + tr > th,
+.skill-prediction-table > tbody > tr + tr > td { border-top:4px solid #b6ad91; }
 .skill-prediction-table .skill-owned-badge { max-width:330px; white-space:normal; line-height:1.6; }
 .skill-boost-name,.skill-boost-feature { display:inline-block; }
 .skill-boost-name { white-space:nowrap; }
