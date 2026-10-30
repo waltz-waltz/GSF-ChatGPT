@@ -5019,13 +5019,69 @@ function ownedBonusesEmpty(weapon) {
   return normalizeKeepCategories(weapon.categories).every((category) => category === null);
 }
 
-// 例：「兇爪竜の力＋ヌシの魂」。未登録なら空文字
+// 手持ちのスキルはグループ→シリーズの順で統一する。
+function ownedSkillEntries(weapon) {
+  return [
+    ["group", GROUP_SKILLS[weapon.groupIndex]],
+    ["series", SERIES_SKILLS[weapon.seriesIndex]],
+  ].filter(([, skill]) => Boolean(skill));
+}
+
 function ownedSkillText(weapon) {
-  const parts = [
-    weapon.seriesIndex === null ? null : SERIES_SKILLS[weapon.seriesIndex],
-    weapon.groupIndex === null ? null : GROUP_SKILLS[weapon.groupIndex],
-  ].filter(Boolean);
-  return parts.join("＋");
+  return ownedSkillEntries(weapon).map(([, skill]) => skill).join(" + ");
+}
+
+function ownedWeaponAutoName(weapon) {
+  const subtype = weapon.subtype || ownedSubtypeFor(weapon.weaponType, weapon.attributeForce, weapon.boost);
+  const attribute = optionName(ATTRIBUTES, weapon.attributeForce).replace(/属性$/, "");
+  if (!weapon.boost && !subtype) return "";
+  return `${weapon.boost ? `【${weapon.boost}】` : ""}${[subtype, attribute].filter(Boolean).join(" ")}`;
+}
+
+// 既存の自動生成名だけ表示を整える。保存済みの名前や独自の名前は書き換えない。
+function ownedWeaponSummaryName(weapon) {
+  const label = weapon.label?.trim() || "";
+  const automatic = ownedWeaponAutoName(weapon);
+  if (!label) return automatic;
+  if (!automatic) return label;
+  const prefix = weapon.boost ? `【${weapon.boost}】` : "";
+  const subtypes = [weapon.subtype || "", ownedSubtypeFor(weapon.weaponType, weapon.attributeForce, weapon.boost)];
+  const attribute = optionName(ATTRIBUTES, weapon.attributeForce);
+  const compact = (value) => value.replace(/\s+/g, "");
+  const generated = subtypes.some((subtype) => [attribute, attribute.replace(/属性$/, "")]
+    .some((attr) => compact(label) === compact(prefix + subtype + attr)));
+  return generated ? automatic : label;
+}
+
+function createOwnedSummarySkills(weapon) {
+  const wrap = document.createElement("span");
+  wrap.className = "owned-summary-skills";
+  wrap.setAttribute("aria-label", "所持スキル");
+  const entries = ownedSkillEntries(weapon);
+  for (const [kind, skill] of entries) {
+    if (wrap.childElementCount > 0) {
+      const plus = document.createElement("span");
+      plus.className = "owned-skill-plus";
+      plus.textContent = "+";
+      wrap.append(plus);
+    }
+    const chip = document.createElement("span");
+    chip.className = `skill-tag ${kind}`;
+    chip.textContent = t(skill);
+    wrap.append(chip);
+  }
+  if (entries.length === 0) wrap.textContent = "スキル未登録";
+  return wrap;
+}
+
+function createOwnedSummaryBonuses(weapon) {
+  const wrap = document.createElement("span");
+  wrap.className = "owned-summary-bonuses";
+  wrap.setAttribute("aria-label", "現在の復元ボーナス");
+  const chips = createOwnedBonusChips(weapon);
+  if (ownedBonusesKnown(weapon)) wrap.append(...chips.childNodes);
+  else wrap.append(chips);
+  return wrap;
 }
 
 // その武器種・属性で、同じシリーズ＋グループのスキルを持っている手持ち武器
@@ -5774,24 +5830,25 @@ function buildOwnedWeaponContent(container) {
     const card = document.createElement("details");
     card.className = "weapon-filter-row owned-weapon-card";
     const summary = document.createElement("summary");
-    // 左端に武器種の札（ぱっと見で弓・ガンランスなどが分かるように）
+    const summaryLine = document.createElement("span");
+    summaryLine.className = "owned-summary-line";
+    // 武器種＋属性、名前、グループ＋シリーズ、5枠、判定条件の順。
     const typeBadge = document.createElement("span");
     typeBadge.className = "owned-type-badge";
-    typeBadge.textContent = t(optionName(WEAPON_TYPES, weapon.weaponType));
-    summary.append(typeBadge);
+    typeBadge.textContent = weaponAndAttributeText(weapon);
     const name = document.createElement("span");
-    name.className = "weapon-filter-name";
-    name.textContent = comparisonTargetName(weapon);
+    name.className = "owned-summary-name";
     const state = document.createElement("span");
-    state.className = "weapon-filter-state";
+    state.className = "owned-summary-details";
     const updateState = () => {
-      const bonusPart = ownedBonusesEmpty(weapon)
-        ? "復元ボーナス未入力"
-        : ownedWeaponProblem(weapon)
-          ? `⚠ ${ownedWeaponProblem(weapon)}`
-          : `${ownedLayoutText(weapon)}｜${ownedRuleText(weapon)}で一致`;
-      const skillPart = ownedSkillText(weapon) ? `スキル：${ownedSkillText(weapon)}` : "スキル未登録";
-      state.textContent = `${weaponAndAttributeText(weapon)}${weapon.boost ? `・${weapon.boost}` : ""}｜${bonusPart}｜${skillPart}`;
+      name.textContent = ownedWeaponSummaryName(weapon);
+      name.hidden = !name.textContent;
+      const rule = document.createElement("span");
+      rule.className = "owned-summary-rule";
+      const problem = ownedBonusesEmpty(weapon) ? null : ownedWeaponProblem(weapon);
+      rule.textContent = problem ? `⚠ ${problem}` : ownedBonusesKnown(weapon) || weapon.rule === "ex"
+        ? `${ownedRuleText(weapon)}で一致` : ownedRuleText(weapon);
+      state.replaceChildren(createOwnedSummarySkills(weapon), createOwnedSummaryBonuses(weapon), rule);
     };
     updateState();
     const removeButton = document.createElement("button");
@@ -5825,7 +5882,8 @@ function buildOwnedWeaponContent(container) {
       });
       return button;
     };
-    summary.append(name, state);
+    summaryLine.append(typeBadge, name, state);
+    summary.append(summaryLine);
     setupCollapsible(card, summary, `owned:${where}:${weapon.id}`, "クリックで設定欄が開きます");
     const actions = document.createElement("span");
     actions.className = "owned-card-actions";
@@ -5864,7 +5922,6 @@ function buildOwnedWeaponContent(container) {
         seriesIndex: cardSkills.seriesIndex,
         groupIndex: cardSkills.groupIndex,
       });
-      name.textContent = comparisonTargetName(weapon);
       updateState();
       onOwnedWeaponsChanged(container);
     };
@@ -8573,7 +8630,7 @@ creationWorkbench = mountCreationWorkbench(document.querySelector('#creation-gui
   stats:createWeaponStatComparison,
   subtype:(type,boost,attr)=>ownedSubtypeFor(type,attr,boost),
   feature:(type,attr,boost)=>skillBoostFeature({weaponType:type,attributeForce:attr},boost),
-  autoLabel:(type,attr,boost)=>[boost?'【'+boost+'】':'',ownedSubtypeFor(type,attr,boost),optionName(ATTRIBUTES,attr)].filter(Boolean).join(' ').slice(0,24),
+  autoLabel:(type,attr,boost)=>ownedWeaponAutoName({weaponType:type,attributeForce:attr,boost}).slice(0,24),
   tag:(type,id,normal)=>{const tag=document.createElement('span');tag.className='bonus-tag '+(normal?artianBaseBonusClassName(id):bonusClassName(id))+(!normal&&EX_BONUS_IDS.has(id)?' ex':'');tag.textContent=normal?artianBaseBonusName(type,id):gogmaBonusName(type,id);return tag;},
 });
 

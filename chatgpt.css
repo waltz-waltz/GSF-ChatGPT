@@ -156,6 +156,20 @@
   #skill-table-wrap.skill-results-focused .skill-match-cell { padding:8px; }
   #skill-table-wrap.skill-results-focused .skill-match-item { grid-template-columns:minmax(0,1fr); padding:12px; }
 }
+/* 手持ち武器：武器種・属性→名前→スキル→5枠→条件の順で読む。 */
+details.owned-weapon-card > summary { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px 12px; align-items:center; }
+.owned-summary-line { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; min-width:0; grid-column:1; grid-row:1; }
+.owned-summary-line .owned-type-badge { min-width:8em; padding:5px 10px; font-size:.86rem; }
+.owned-summary-name { color:#8fe0d6; font-size:.9rem; font-weight:800; overflow-wrap:anywhere; }
+.owned-summary-name[hidden] { display:none; }
+.owned-summary-details { display:contents; }
+.owned-summary-skills,.owned-summary-bonuses { display:inline-flex; flex-wrap:wrap; gap:5px; align-items:center; color:#cbc8b4; font-size:.78rem; }
+.owned-summary-skills .skill-tag { min-width:0; width:auto; padding:5px 8px; font-size:.8rem; white-space:normal; }
+.owned-skill-plus { color:#d6cba2; font-size:.9rem; font-weight:800; }
+.owned-summary-bonuses .bonus-tag { min-width:0; padding:4px 7px; font-size:.8rem; white-space:nowrap; }
+.owned-summary-rule { color:#cbc8b4; font-size:.76rem; line-height:1.6; }
+.owned-weapon-card > summary > .collapsible-hint { grid-column:1 / -1; grid-row:2; margin:0; }
+.owned-weapon-card > summary > .owned-card-actions { grid-column:2; grid-row:1; align-self:start; margin-left:0; }
 /* 武器の前後比較。↑↓・符号も付け、色だけで増減を区別しない。 */
 .weapon-stat-inline { display:flex; flex-wrap:wrap; gap:4px 12px; margin:8px 0 5px; padding-top:7px; border-top:1px solid #62644e; font-size:.76rem; font-variant-numeric:tabular-nums; }
 .weapon-stat-inline > span { display:block; font-weight:800; }
