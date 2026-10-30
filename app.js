@@ -13,7 +13,8 @@ import {
   predictArtianBaseRolls,
 } from "./artian-base-rng.js";
 import { localizedTargetName, t } from "./i18n.js";
-import { mountCreationWorkbench } from "./creation-workbench.js?v=bonus-headings-1";
+import { mountCreationWorkbench } from "./creation-workbench.js?v=boost-features-1";
+import { normalizeWeaponStatReference, makeWeaponStatReference, weaponStatComparison } from "./weapon-stats.js?v=20261030-1";
 import { WORKBENCH_KEY, transition, stateSignature, writeAtomic } from "./creation-operations.js";
 import { setupResultToolbars } from "./result-toolbars.js";
 
@@ -241,7 +242,7 @@ document.title = "GSF ChatGPT";
 // 「一致」列の見た目
 document.head.append(Object.assign(document.createElement("style"), {
   textContent: `
-    .skill-prediction-table { --match-column-width: 230px; }
+    .skill-prediction-table { --match-column-width: 330px; }
     .skill-match-cell { min-width: var(--match-column-width); vertical-align: top; }
     /* 画面が広いときは「一致」列も左に固定して、横スクロールしても見えるようにする */
     @media (min-width: 900px) {
@@ -1166,13 +1167,13 @@ const OWNED_RULE_OPTIONS = [
 // 手持ち武器の名前の自動入力に使う「激化」と、武器種ごとの「種類」の最初の候補
 // （種類は自由に書けて、書いたものは武器種ごとに候補として覚える）
 const OWNED_BOOST_OPTIONS = [["", "なし"], ["攻撃激化", "【攻撃激化】"], ["属性激化", "【属性激化】"], ["会心激化", "【会心激化】"]];
-// 激化タイプで決まる種類（弓：ビン、ガンランス：砲撃タイプ、スラアク・チャアク：ビン、ライトボウガン：速射できる弾）。
-// 弓・ガンランス・ライトボウガン・狩猟笛（響玉）はユーザー確認済み。スラアク・チャアクは攻略サイト（GameWith）の表から
+// 激化の基本候補。属性による違いは ownedSubtypeFor で解決する。
+// 2026-10-30：kuroyonhon.com/mhwilds/memo/38.php の検証表と GameWith /534657 を照合。
 const OWNED_SUBTYPE_BY_BOOST = {
   5: { 攻撃激化: "状態異常＆属性やられ無効", 会心激化: "スタミナ継続回復", 属性激化: "防御力＆属性耐性UP" },
   7: { 攻撃激化: "通常", 会心激化: "放射", 属性激化: "拡散" },
   8: { 攻撃激化: "強撃", 会心激化: "強属性", 属性激化: "強属性" },
-  9: { 攻撃激化: "榴弾" },
+  9: { 攻撃激化: "榴弾", 会心激化: "強属性", 属性激化: "強属性" },
   11: { 攻撃激化: "接撃", 会心激化: "強撃", 属性激化: "貫通" },
   13: { 攻撃激化: "通常・散弾", 会心激化: "通常・貫通", 属性激化: "散弾・貫通" },
 };
@@ -3986,12 +3987,15 @@ function createComparisonRow(index) {
         ? createAdoptOwnedUpdateButton(target, target.rolls[index], index + 1)
         : createAdoptAsOwnedButton(target, target.rolls[index], index + 1);
       matchButton.classList.add("match-adopt-button");
-      item.append(name, createCompactBonusSet(target, target.rolls[index], true), matchButton);
+      item.append(name, createCompactBonusSet(target, target.rolls[index], true));
+      if (target.kind === "owned") item.append(createWeaponStatComparison(target, target.rolls[index], { compact: true }));
+      item.append(matchButton);
       appendWeaponMatchItem(target.kind === "owned" ? ownedHalf : resetHalf, target.weaponType, item);
     }
     if (!showAll) continue;
     if (target.kind === "owned") {
       cell.classList.add("owned-result-cell");
+      bonusSet.append(createWeaponStatComparison(target, target.rolls[index], { compact: true }));
       bonusSet.append(createAdoptOwnedUpdateButton(target, target.rolls[index], index + 1));
     } else {
       bonusSet.append(createAdoptAsOwnedButton(target, target.rolls[index], index + 1));
@@ -4990,6 +4994,7 @@ function loadOwnedWeapons() {
             : (Array.isArray(weapon.bonuses) ? "upgrade" : "ex"),
           minEx: Math.max(1, Math.min(5, Math.trunc(Number(weapon.minEx) || 2))),
           keepAttack: weapon.keepAttack !== false,
+          statReference: normalizeWeaponStatReference(weapon.statReference),
         };
       });
   } catch {
@@ -5030,6 +5035,69 @@ function ownedSkillHolders(target, roll) {
     && weapon.attributeForce === target.attributeForce
     && weapon.seriesIndex === roll.seriesIndex
     && weapon.groupIndex === roll.groupIndex);
+}
+
+// 同じスキルの所持状況を激化別に判定する。激化不明の武器で全タイプを所持扱いにしない。
+function skillBoostOwnership(target, roll) {
+  const holders = ownedSkillHolders(target, roll);
+  const boosts = OWNED_BOOST_OPTIONS.filter(([boost]) => boost).map(([boost]) => ({
+    boost,
+    holders: holders.filter((weapon) => weapon.boost === boost),
+  }));
+  const unknown = holders.filter((weapon) => !boosts.some(({ boost }) => weapon.boost === boost));
+  return { boosts, unknown };
+}
+
+function skillBoostLabel(target, boost) {
+  return `${weaponAndAttributeText(target)}（${boost || "激化未登録"}）${skillBoostFeature(target, boost)}`;
+}
+
+// チャアクの火水雷氷龍と状態異常、無属性スラアクの滅龍ビンを区別する。
+function ownedSubtypeFor(weaponType, attributeForce, boost) {
+  if (!OWNED_BOOST_OPTIONS.some(([value]) => value && value === boost)) return "";
+  if (weaponType === 9) {
+    if (boost === "攻撃激化") return "榴弾";
+    if (!Number.isInteger(attributeForce) || attributeForce < 0 || attributeForce > 9) return "";
+    return attributeForce >= 1 && attributeForce <= 5 ? "強属性" : "榴弾";
+  }
+  if (weaponType === 8) {
+    if (!Number.isInteger(attributeForce) || attributeForce < 0 || attributeForce > 9) return "";
+    if (attributeForce === 0) return "滅龍";
+  }
+  return OWNED_SUBTYPE_BY_BOOST[weaponType]?.[boost] ?? "";
+}
+
+function skillBoostFeature(target, boost) {
+  if (!OWNED_BOOST_OPTIONS.some(([value]) => value && value === boost)) return "";
+  if (target.weaponType === 12) {
+    // 巨戟化前からの主な装填数変化。生産パーツ数が不明でも絶対装填数を捏造しない。
+    const elemental = Number.isInteger(target.attributeForce) && target.attributeForce > 0 && target.attributeForce <= 9;
+    const status = [6, 7, 8].includes(target.attributeForce);
+    const loss = (elemental ? "・属性弾−1" : "") + (status ? "・状態異常弾−1" : "");
+    const changes = boost === "攻撃激化" ? `通常Lv2+1${loss}`
+      : boost === "会心激化" ? `通常/貫通Lv2+1・散弾Lv2−1${loss}`
+        : "貫通Lv2+1・斬裂Lv1追加";
+    return `【装填変化：${changes}】`;
+  }
+  let subtype = ownedSubtypeFor(target.weaponType, target.attributeForce, boost);
+  if (target.weaponType === 11 && subtype && [6, 7, 8, 9].includes(target.attributeForce)) {
+    subtype += `＋${({ 6: "毒", 7: "麻痺", 8: "睡眠", 9: "爆破" })[target.attributeForce]}`;
+  }
+  const featureNames = { 5: "響玉", 7: "砲撃", 8: "ビン", 9: "ビン", 11: "ビン", 13: "速射" };
+  if (!subtype) return "";
+  const name = target.weaponType === 13 ? "速射・物理弾Lv2" : featureNames[target.weaponType] ?? "特徴";
+  const extra = target.weaponType === 13 && boost === "属性激化" && target.attributeForce > 0 ? "【属性弾装填：+1】" : "";
+  return `【${name}：${subtype}${target.weaponType === 7 ? "型" : ""}】${extra}`;
+}
+
+function appendSkillBoostLabel(container, target, boost, prefix) {
+  const boostName = document.createElement("span");
+  boostName.className = "skill-boost-name";
+  boostName.textContent = `（${boost || "激化未登録"}）`;
+  const feature = document.createElement("span");
+  feature.className = "skill-boost-feature";
+  feature.textContent = skillBoostFeature(target, boost);
+  container.append(`${prefix}${weaponAndAttributeText(target)}`, boostName, feature);
 }
 
 function ownedWeaponDefaultName(weapon) {
@@ -5176,7 +5244,7 @@ function createAdoptAsOwnedButton(target, bonusIds, completedRolls) {
         ...sameKind.map((weapon) => ({
           tag: "上書き",
           name: comparisonTargetName(weapon),
-          detail: ownedWeaponDetailNode(weapon),
+          detail: (() => { const detail = ownedWeaponDetailNode(weapon); detail.append(createWeaponStatComparison(weapon, bonusIds, { compact: true })); return detail; })(),
           onChoose: () => adoptResetToOwned(weapon, bonusIds, completedRolls),
         })),
         ...OWNED_BOOST_OPTIONS.map(([boost]) => ({
@@ -5206,7 +5274,7 @@ async function adoptResetAsNewOwned(target, boost, bonusIds, completedRolls) {
     return;
   }
   const attribute = optionName(ATTRIBUTES, target.attributeForce).replace("属性", "");
-  const subtype = OWNED_SUBTYPE_BY_BOOST[target.weaponType]?.[boost] ?? "";
+  const subtype = ownedSubtypeFor(target.weaponType, target.attributeForce, boost);
   const weapon = {
     id: createTargetId(),
     label: boost ? `【${boost}】${subtype ? `${subtype} ` : ""}${attribute}` : "",
@@ -5253,6 +5321,10 @@ function createAdoptOwnedUpdateButton(target, bonusIds, completedRolls) {
       flowRow("adopt-flow-arrow", "↓"),
       flowRow("adopt-flow-row", flowLabel("新しく付与される復元ボーナス"), createCompactBonusSet(target, bonusIds)),
     );
+    const stats = document.createElement("div");
+    const updateStats = () => stats.replaceChildren(createWeaponStatComparison(weapon, bonusIds));
+    updateStats();
+    flow.append(stats, createWeaponStatEditor(weapon, () => { updateStats(); onOwnedWeaponsChanged(); }));
     openAdoptDialog({
       title: `${completedRolls}回先の復元ボーナスで手持ち武器を更新`,
       summary: [flow],
@@ -5267,6 +5339,99 @@ function createAdoptOwnedUpdateButton(target, bonusIds, completedRolls) {
     });
   });
   return button;
+}
+
+function statNumber(value, unit = "", signed = false) {
+  if (value === null) return "未入力";
+  const text = Math.abs(value).toLocaleString("ja-JP");
+  return `${value < 0 ? "−" : signed ? "+" : ""}${text}${unit}`;
+}
+
+function statDelta(row) {
+  if (row.delta === null) return "未計算";
+  const unit = row.key === "affinity" ? "pt" : row.unit;
+  return row.delta === 0 ? `±0${unit}` : `${row.delta > 0 ? "↑ " : "↓ "}${statNumber(row.delta, unit, true)}`;
+}
+
+function createWeaponStatComparison(weapon, bonusIds, { compact = false } = {}) {
+  const result = weaponStatComparison(weapon, bonusIds);
+  const box = document.createElement("section");
+  box.className = compact ? "weapon-stat-inline" : "weapon-stat-comparison";
+  if (compact) {
+    for (const row of result.rows.filter((r) => ["attack", "element", "affinity"].includes(r.key))) {
+      const item = document.createElement("span");
+      item.className = row.delta > 0 ? "stat-increase" : row.delta < 0 ? "stat-decrease" : "stat-unchanged";
+      item.textContent = !row.applicable ? `${row.label} 対象外` : row.absolute
+        ? `${row.label} ${statNumber(row.before,row.unit)}→${statNumber(row.after,row.unit)}（${statDelta(row)}）`
+        : `${row.label} ${statDelta(row)}`;
+      item.title = row.applicable ? `${row.absolute ? "武器全体" : "復元ボーナス分"}：${statNumber(row.before,row.unit,!row.absolute)} → ${statNumber(row.after,row.unit,!row.absolute)}` : "弾・ビンで扱うため武器の属性値には換算しません。";
+      box.append(item);
+    }
+    const note = document.createElement("small"); note.textContent = "攻撃は係数なし。未登録の数値はボーナス差。"; box.append(note);
+    return box;
+  }
+  const title = document.createElement("h4"); title.textContent = "更新前・更新後の数値";
+  const table = document.createElement("table"); table.className = "weapon-stat-table";
+  const head = document.createElement("thead"), headRow = document.createElement("tr");
+  for (const text of ["項目", "更新前", "更新後", "差分"]) { const cell = document.createElement("th"); cell.scope = "col"; cell.textContent = text; headRow.append(cell); }
+  head.append(headRow); const body = document.createElement("tbody");
+  for (const row of result.rows) {
+    const tr = document.createElement("tr"); tr.dataset.stat = row.key;
+    const name = document.createElement("th"); name.scope = "row"; name.textContent = row.label;
+    if (row.applicable && ["attack", "element", "affinity"].includes(row.key)) {
+      const scope = document.createElement("small"); scope.textContent = row.absolute ? "武器全体" : "ボーナス分"; name.append(scope);
+    }
+    tr.append(name);
+    for (const value of [row.before, row.after]) { const cell = document.createElement("td"); cell.textContent = row.applicable ? statNumber(value,row.unit,!row.absolute) : "対象外"; tr.append(cell); }
+    const delta = document.createElement("td"); delta.className = row.delta > 0 ? "stat-increase" : row.delta < 0 ? "stat-decrease" : "stat-unchanged";
+    delta.textContent = row.applicable ? statDelta(row) : "—"; tr.append(delta); body.append(tr);
+  }
+  table.append(head,body);
+  const note = document.createElement("p"); note.className = "weapon-stat-note";
+  note.textContent = "攻撃力は武器係数なしの基礎攻撃力です。未登録の項目は復元ボーナスの加算分を表示。装備スキル・護符・食事・会心による実ダメージの変化は含みません。";
+  box.append(title,table,note);
+  if (result.staleReference) { const stale = document.createElement("p"); stale.className = "stat-decrease"; stale.textContent = "激化タイプ等が登録時と変わったため、合計値は再登録まで使わずボーナス分を表示しています。"; box.append(stale); }
+  return box;
+}
+
+function saveWeaponStatReference(weapon, fields) {
+  const current = ownedWeapons.find((entry) => entry.id === weapon.id);
+  if (!current) throw new Error("この武器は手持ちから削除されています。画面を開き直してください。");
+  const normalized = ownedWeapons.map((entry) => ({ ...entry, statReference: normalizeWeaponStatReference(entry.statReference) }));
+  if (stateSignature(loadOwnedWeapons()) !== stateSignature(normalized)) throw new Error("別の画面で手持ち武器が変更されました。最新のデータで開き直してから入力してください。");
+  const reference = makeWeaponStatReference(current, fields);
+  writeAtomic(localStorage, { [OWNED_WEAPONS_KEY]: JSON.stringify(ownedWeapons.map((entry) => entry === current ? { ...entry, statReference: reference } : entry)) });
+  current.statReference = reference;
+  return current;
+}
+
+function createWeaponStatEditor(weapon, onSaved) {
+  const details = document.createElement("details"); details.className = "weapon-stat-editor";
+  const summary = document.createElement("summary"); summary.textContent = "武器全体の数値を登録・修正（任意）";
+  const note = document.createElement("p"); note.className = "weapon-stat-note";
+  note.textContent = "初回だけ、今の5枠が付いた武器自体の数値を登録すると、以後の合計値も計算します。攻撃はゲームの表示設定を係数なしにした基礎攻撃力を入力。スキル・護符・食事などの補正は含めないでください。空欄の項目はボーナス分だけを表示します。激化タイプを変えた場合はゲーム内の数値を入れ直してください。";
+  const ref = normalizeWeaponStatReference(weapon.statReference);
+  const current = weaponStatComparison(weapon, weapon.bonuses);
+  const grid = document.createElement("div"); grid.className = "weapon-stat-inputs";
+  const inputs = new Map();
+  for (const row of current.rows.filter((entry) => ["attack", "element", "affinity"].includes(entry.key) && entry.applicable)) {
+    const label = document.createElement("label"), text = document.createElement("span"), input = document.createElement("input");
+    text.textContent = `今の${row.label}${row.key === "affinity" ? "（%）" : ""}`;
+    input.type = "number"; input.step = "1"; input.min = row.key === "affinity" ? "-100" : "0"; input.max = row.key === "affinity" ? "100" : "99999";
+    input.value = row.absolute && row.before !== null ? String(row.before) : ""; input.placeholder = "未登録"; input.dataset.statInput = row.key;
+    label.append(text,input); grid.append(label); inputs.set(row.key,input);
+  }
+  const message = document.createElement("p"); message.className = "weapon-stat-message"; message.setAttribute("role","status");
+  const save = document.createElement("button"); save.type = "button"; save.className = "secondary small-button"; save.textContent = "数値を登録して比較に使う";
+  const clear = document.createElement("button"); clear.type = "button"; clear.className = "text-button"; clear.textContent = "数値の登録を解除"; clear.hidden = !ref;
+  const commit = (fields) => {
+    message.classList.remove("error");
+    try { saveWeaponStatReference(weapon,fields); clear.hidden = !weapon.statReference; message.textContent = weapon.statReference ? "数値を登録しました。カウンターやボーナスは変更していません。" : "数値の登録を解除しました。ボーナス分の比較に戻ります。"; onSaved(); }
+    catch (error) { message.classList.add("error"); message.textContent = error.message; }
+  };
+  save.addEventListener("click",()=>commit(Object.fromEntries([...inputs].map(([key,input])=>[key,input.value]))));
+  clear.addEventListener("click",()=>{ commit({}); if(!weapon.statReference) for(const input of inputs.values())input.value=""; });
+  details.append(summary,note,grid,save,clear,message); return details;
 }
 
 // 同じ構成の結果を採用：手持ち武器の今のボーナスを更新して、0地点を進める
@@ -5473,7 +5638,7 @@ function buildOwnedWeaponContent(container) {
   const updateSubtypeList = () => {
     const weaponType = Number(weaponSelectEl.value);
     const history = loadBonusView().subtypeHistory[weaponType] ?? [];
-    const suggestions = [...new Set([...Object.values(OWNED_SUBTYPE_BY_BOOST[weaponType] ?? {}), ...history])];
+    const suggestions = [...new Set([...OWNED_BOOST_OPTIONS.map(([boost]) => ownedSubtypeFor(weaponType, Number(attributeSelectEl.value), boost)), ...history])].filter(Boolean);
     subtypeList.replaceChildren(...suggestions.map((value) => {
       const option = document.createElement("option");
       option.value = value;
@@ -5496,8 +5661,8 @@ function buildOwnedWeaponContent(container) {
   });
   // 激化タイプで種類が決まる武器（弓・ガンランスなど）は、種類を自動で入れる
   const applySubtypeFromBoost = () => {
-    const table = OWNED_SUBTYPE_BY_BOOST[Number(weaponSelectEl.value)];
-    if (table) subtypeInput.value = table[boostSelect.value] ?? "";
+    const weaponType = Number(weaponSelectEl.value);
+    if (OWNED_SUBTYPE_BY_BOOST[weaponType]) subtypeInput.value = ownedSubtypeFor(weaponType, Number(attributeSelectEl.value), boostSelect.value);
   };
   boostSelect.addEventListener("change", () => { applySubtypeFromBoost(); updateName(); rememberForm(); });
   subtypeInput.addEventListener("input", () => { updateName(); rememberForm(); });
@@ -5509,7 +5674,7 @@ function buildOwnedWeaponContent(container) {
     updateName();
     rememberForm();
   });
-  attributeSelectEl.addEventListener("change", () => { updateName(); rememberForm(); });
+  attributeSelectEl.addEventListener("change", () => { applySubtypeFromBoost(); updateSubtypeList(); updateName(); rememberForm(); });
   updateSubtypeList();
   updateName();
 
@@ -5723,7 +5888,7 @@ function buildOwnedWeaponContent(container) {
     renameInput.addEventListener("change", save);
     cardBoostSelect.addEventListener("change", save);
     cardRule.wrap.addEventListener("change", save);
-    body.append(renameLabel, boostLabel, cardBonusTitle, cardSlots, cardSkillBox, cardRule.wrap);
+    body.append(renameLabel, boostLabel, createWeaponStatEditor(weapon, () => onOwnedWeaponsChanged(container)), cardBonusTitle, cardSlots, cardSkillBox, cardRule.wrap);
     card.append(summary, body);
     wrapInCollapsible(cardSkillBox, `owned-skill:${where}:${weapon.id}`,
       `スキル：${ownedSkillText(weapon) || "未登録"}`, "クリックでスキルの選択欄が開きます");
@@ -6634,7 +6799,7 @@ function createSkillPredictionRow(index, skillFilter, highlightEnabled) {
     const cell = document.createElement("td");
     const conditionMatch = highlightEnabled && skillRollMatchesFilter(roll, skillFilterForTarget(skillFilter, target));
     cell.append(createSkillResultPair(roll, conditionMatch));
-    // すでに持っている組み合わせは、一致から外さずに「所持済み：弓・火（攻撃激化）」と表示するだけ
+    // 各武器の列では所持済みを表示し、一致列には未所持の激化候補も添える。
     const holdersBadge = createOwnedSkillBadge(target, roll);
     if (holdersBadge) cell.append(holdersBadge);
     row.append(cell);
@@ -6646,7 +6811,7 @@ function createSkillPredictionRow(index, skillFilter, highlightEnabled) {
       name.className = "skill-match-name";
       name.append(...createWeaponBadge(target));
       item.append(name, createSkillResultPair(roll, true));
-      if (holdersBadge) item.append(createOwnedSkillBadge(target, roll));
+      item.append(createSkillBoostCoverage(target, roll));
       item.append(createSkillAdoptButton(target, roll, index + 1));
       matchCell.append(item);
     }
@@ -6661,17 +6826,60 @@ function createSkillPredictionRow(index, skillFilter, highlightEnabled) {
   return row;
 }
 
-// 「所持済み：弓・火（攻撃激化）」の印。その武器種・属性で同じ組み合わせを持っていなければ null
+// 各武器の列に表示する、同じスキルを持つ激化タイプ（特徴付き）。
 function createOwnedSkillBadge(target, roll) {
-  const holders = ownedSkillHolders(target, roll);
+  const coverage = skillBoostOwnership(target, roll);
+  const holders = [...coverage.boosts.flatMap((entry) => entry.holders), ...coverage.unknown];
   if (holders.length === 0) return null;
   const badge = document.createElement("div");
-  badge.className = "skill-owned-badge";
-  const lines = [...new Set(holders.map((weapon) =>
-    `${weaponAndAttributeText(weapon)}（${weapon.boost || "激化未設定"}）`))];
-  badge.textContent = `所持済み：${lines.join("／")}`;
+  badge.className = "skill-owned-list";
+  for (const weapon of new Map(holders.map((weapon) => [weapon.boost, weapon])).values()) {
+    const entry = document.createElement("div");
+    entry.className = "skill-owned-badge";
+    appendSkillBoostLabel(entry, weapon, weapon.boost, "所持済み：");
+    badge.append(entry);
+  }
   badge.title = holders.map((weapon) => comparisonTargetName(weapon)).join("\n");
   return badge;
+}
+
+// 一致したスキルを新しく作るときの候補。表示だけで武器やカウンターを変更しない。
+function createSkillBoostCoverage(target, roll) {
+  const { boosts, unknown } = skillBoostOwnership(target, roll);
+  const wrap = document.createElement("div");
+  wrap.className = "skill-boost-coverage";
+  const note = document.createElement("small");
+  note.className = "skill-coverage-note";
+  note.textContent = "このスキルの組み合わせでの所持状況";
+  wrap.append(note);
+  const owned = createOwnedSkillBadge(target, roll);
+  if (owned) wrap.append(owned);
+  const missing = boosts.filter((entry) => entry.holders.length === 0);
+  if (missing.length > 0) {
+    const heading = document.createElement("strong");
+    heading.className = "skill-missing-heading";
+    heading.textContent = unknown.length > 0 ? "作成候補（所持状況の確認が必要）" : "作るなら（未所持）";
+    wrap.append(heading);
+    for (const { boost } of missing) {
+      const candidate = document.createElement("div");
+      candidate.className = "skill-missing-candidate";
+      candidate.dataset.boost = boost;
+      appendSkillBoostLabel(candidate, target, boost, `${unknown.length > 0 ? "所持未確認" : "未所持"}：`);
+      wrap.append(candidate);
+    }
+  } else {
+    const complete = document.createElement("strong");
+    complete.className = "skill-coverage-complete";
+    complete.textContent = "全3タイプ所持済み";
+    wrap.append(complete);
+  }
+  if (unknown.length > 0) {
+    const warning = document.createElement("small");
+    warning.className = "skill-coverage-note";
+    warning.textContent = "同じスキルの武器に激化未登録のものがあります。手持ち武器【巨戟】で登録すると判定できます。";
+    wrap.append(warning);
+  }
+  return wrap;
 }
 
 // スキルの当たりを採用するボタン。押すと、どの手持ち武器に付けるか（または新しく登録するか）を選ぶ
@@ -6703,7 +6911,7 @@ function createSkillAdoptButton(target, roll, completedRolls) {
           onChoose: () => adoptSkillToOwned(weapon, roll, completedRolls),
         })),
         ...OWNED_BOOST_OPTIONS.map(([boost]) => ({
-          name: `＋ 新しい手持ち武器として登録（${weaponAndAttributeText(target)}・${boost || "激化未設定"}）`,
+          name: `＋ 新しい手持ち武器として登録：${skillBoostLabel(target, boost)}`,
           onChoose: () => adoptSkillAsNewOwned(target, boost, roll, completedRolls),
         })),
       ],
@@ -6726,7 +6934,7 @@ async function adoptSkillAsNewOwned(target, boost, roll, completedRolls) {
     return;
   }
   const attribute = optionName(ATTRIBUTES, target.attributeForce).replace("属性", "");
-  const subtype = OWNED_SUBTYPE_BY_BOOST[target.weaponType]?.[boost] ?? "";
+  const subtype = ownedSubtypeFor(target.weaponType, target.attributeForce, boost);
   ownedWeapons.push({
     id: createTargetId(),
     label: boost ? `【${boost}】${subtype ? `${subtype} ` : ""}${attribute}` : "",
@@ -8350,8 +8558,10 @@ creationWorkbench = mountCreationWorkbench(document.querySelector('#creation-gui
     :predict_gogma_rolls(seed,type,attr,counter,35,1)),
   normalName:artianBaseBonusName, bonusName:gogmaBonusName, bonusOptions:gogmaBonusesForWeapon,
   compactBonusName:compactGogmaBonusName,
-  subtype:(type,boost)=>OWNED_SUBTYPE_BY_BOOST[type]?.[boost]??'',
-  autoLabel:(type,attr,boost)=>[boost?'【'+boost+'】':'',OWNED_SUBTYPE_BY_BOOST[type]?.[boost]??'',optionName(ATTRIBUTES,attr)].filter(Boolean).join(' ').slice(0,24),
+  stats:createWeaponStatComparison,
+  subtype:(type,boost,attr)=>ownedSubtypeFor(type,attr,boost),
+  feature:(type,attr,boost)=>skillBoostFeature({weaponType:type,attributeForce:attr},boost),
+  autoLabel:(type,attr,boost)=>[boost?'【'+boost+'】':'',ownedSubtypeFor(type,attr,boost),optionName(ATTRIBUTES,attr)].filter(Boolean).join(' ').slice(0,24),
   tag:(type,id,normal)=>{const tag=document.createElement('span');tag.className='bonus-tag '+(normal?artianBaseBonusClassName(id):bonusClassName(id))+(!normal&&EX_BONUS_IDS.has(id)?' ex':'');tag.textContent=normal?artianBaseBonusName(type,id):gogmaBonusName(type,id);return tag;},
 });
 

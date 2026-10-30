@@ -204,9 +204,10 @@ export function mountCreationWorkbench(root,host) {
         }
         const skillEditor=skillsEditor(skillPrediction,'upgrade-skill','実際に付いたスキルが違う場合は修正する');
         upgrade.append(h('p','激化タイプを選んでください。'),boosts,
+          h('p',host.feature?.(type,attribute,form.boost)||'', 'creation-current-weapon'),
           h('h4',skillPrediction?'巨戟化すると付与されるスキル':'スキルを自動予測できません。実際のスキルを選べます'),skillEditor.box,
           h('p','スキルカウンターだけを '+number(save.skillCounter)+' → '+(isKnown(save.skillCounter)?number(save.skillCounter+1):'未特定のまま')+' に進めます。通常の5枠の系統を引き継いで、手持ち武器【巨戟】へ移します。','pool-note'),
-          button('巨戟化して手持ち武器【巨戟】へ移す',()=>dispatch({type:'upgrade',id:host.createId(),weaponId:source.id,attributeForce:attribute,boost:form.boost,subtype:host.subtype(type,form.boost),autoLabel:host.autoLabel(type,attribute,form.boost),...skillEditor.values},basis),'primary','record-upgrade'));
+          button('巨戟化して手持ち武器【巨戟】へ移す',()=>dispatch({type:'upgrade',id:host.createId(),weaponId:source.id,attributeForce:attribute,boost:form.boost,subtype:host.subtype(type,form.boost,attribute),autoLabel:host.autoLabel(type,attribute,form.boost),...skillEditor.values},basis),'primary','record-upgrade'));
         root.append(upgrade);
       }else{
         const currentSkills=skillsEditor(source,'current-giant-skill','現在のスキルを修正する');
@@ -229,6 +230,7 @@ export function mountCreationWorkbench(root,host) {
         const choose=button(text,()=>{form.mode=mode;changed();});choose.setAttribute('aria-pressed',String(form.mode===mode));
         card.classList.toggle('selected',form.mode===mode);
         card.append(choose,prediction?tags(type,prediction,false):h('p',attribute===null?'先に属性の種類を選んでください。':'予測に必要なカウンター・構成が未特定です。実際の結果を手入力できます。','pool-note'));
+        if(prediction&&selected.kind==='giant')card.append(host.stats(source,prediction,{compact:true}));
         if(prediction&&host.goalMatch(type,prediction)){
           card.classList.add('bonus-goal-hit');card.append(h('strong','★ 希望ボーナス一致','bonus-goal-badge'),h('p','希望：'+host.goalText(type),'pool-note'));
         }

@@ -105,3 +105,45 @@
 #creation-guide .creation-upcoming-bonuses .bonus-tag { min-width:0; margin:0; padding:4px 6px; font-size:.8rem; white-space:nowrap; }
 #creation-guide .creation-advance-warning { margin:16px 0; padding:14px; border:2px solid #ffd45d; border-radius:9px; background:#3a3019; color:#ffe9aa; font-weight:800; line-height:1.7; }
 @media(max-width:600px) { .match-weapon-items {display:grid;grid-template-columns:minmax(0,1fr);} .comparison-table .match-weapon-items > .skill-match-item {max-width:none;} #creation-guide .creation-upcoming-list {grid-template-columns:minmax(0,1fr);} .match-weapon-heading {font-size:.95rem!important;} }
+
+/* スキル一致欄の激化別所持状況。未所持は文字と点線でも区別する。 */
+.skill-prediction-table .skill-owned-badge { max-width:330px; white-space:normal; line-height:1.6; }
+.skill-boost-name,.skill-boost-feature { display:inline-block; }
+.skill-boost-name { white-space:nowrap; }
+.skill-boost-feature { max-width:100%; }
+.skill-owned-list { display:grid; gap:4px; }
+.skill-boost-coverage { margin:9px 0; padding:9px; border:1px solid #827247; border-radius:8px; background:#22251b; white-space:normal; }
+.skill-coverage-note { display:block; color:#d0cbb5; font-size:.68rem; line-height:1.5; }
+.skill-boost-coverage .skill-owned-badge { margin:7px 0; line-height:1.6; }
+.skill-missing-heading { display:block; margin:9px 0 5px; color:#ffe399; font-size:.76rem; }
+.skill-missing-candidate { margin-top:5px; padding:7px 8px; border:1px dashed #d7b957; border-radius:6px; color:#fff0bb; font-size:.73rem; line-height:1.65; overflow-wrap:anywhere; }
+.skill-coverage-complete { display:block; margin-top:8px; color:#b5e6d8; font-size:.76rem; }
+/* 武器の前後比較。↑↓・符号も付け、色だけで増減を区別しない。 */
+.weapon-stat-inline { display:flex; flex-wrap:wrap; gap:4px 12px; margin:8px 0 5px; padding-top:7px; border-top:1px solid #62644e; font-size:.76rem; font-variant-numeric:tabular-nums; }
+.weapon-stat-inline > span { display:block; font-weight:800; }
+.weapon-stat-inline > small { flex-basis:100%; color:#c8c5af; font-size:.66rem; font-weight:400; }
+.comparison-bonus-set > .weapon-stat-inline { grid-column:1 / -1; }
+.stat-increase { color:#ffe399!important; font-weight:900; }
+.stat-decrease { color:#ffc2aa!important; font-weight:900; }
+.stat-unchanged { color:#d3d1c0; }
+.weapon-stat-comparison { width:100%; margin:16px 0 8px; padding:14px; border:1px solid #8c8056; border-radius:10px; background:#22251c; }
+.weapon-stat-comparison h4 { margin:0 0 10px; color:#fff0bd; font-size:.92rem; }
+.weapon-stat-table { width:100%; min-width:0; margin:0; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+.weapon-stat-table th,.weapon-stat-table td { padding:8px 10px; border-bottom:1px solid #4d513d; text-align:right; font-size:.9rem; white-space:nowrap; }
+.weapon-stat-table th:first-child { text-align:left; white-space:normal; }
+.weapon-stat-table thead th { color:#d4d0b9; font-size:.75rem; }
+.weapon-stat-table tbody td { font-weight:800; }
+.weapon-stat-table tr[data-stat="attack"] td { font-size:1.1rem; }
+.weapon-stat-table th small { display:block; margin-top:2px; font-size:.65rem; font-weight:400; color:#c1bda4; }
+.weapon-stat-note { margin:10px 0 0; color:#cfccb7; font-size:.75rem; line-height:1.65; white-space:normal; }
+.weapon-stat-editor { width:100%; margin:12px 0; padding:10px 12px; border:1px solid #696c51; border-radius:8px; background:#21251c; }
+.weapon-stat-editor > summary { cursor:pointer; color:#f4df9b; font-size:.8rem; font-weight:800; }
+.weapon-stat-inputs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:14px 0; }
+.weapon-stat-inputs > label { display:grid; gap:6px; font-size:.78rem; }
+.weapon-stat-inputs input { width:100%; min-width:0; padding:9px; border:1px solid var(--line); border-radius:7px; background:var(--surface); color:var(--text); font-size:.95rem; }
+.weapon-stat-editor > button { margin:6px 8px 0 0; }
+.weapon-stat-message { margin:8px 0 0; font-size:.76rem; line-height:1.5; }
+.weapon-stat-message:empty { display:none; }
+.adopt-flow > .weapon-stat-editor,.adopt-flow > div:has(.weapon-stat-comparison) { width:100%; }
+#creation-guide .creation-restore-card .weapon-stat-inline { margin-top:12px; }
+@media(max-width:600px) { .weapon-stat-inputs {grid-template-columns:1fr;} .weapon-stat-comparison {padding:10px;} .weapon-stat-table th,.weapon-stat-table td {padding:7px 5px;font-size:.78rem;} .weapon-stat-table tr[data-stat="attack"] td {font-size:.9rem;} }
