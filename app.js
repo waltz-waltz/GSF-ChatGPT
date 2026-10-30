@@ -5266,17 +5266,25 @@ function createOwnedBonusChips(weapon) {
   return createCompactBonusSet({ ...weapon, kind: "reset" }, weapon.bonuses);
 }
 
-// 窓の「どの手持ち武器か」の説明：文字の説明の下に、今のボーナスをタグで並べる
+// 上書き先の武器情報・今のスキル・今のボーナスを、それぞれの行で表示する。
 function ownedWeaponDetailNode(weapon) {
   const box = document.createElement("span");
-  box.className = "skill-adopt-detail skill-adopt-detail-rich";
+  box.className = "skill-adopt-detail skill-adopt-detail-rich owned-adopt-detail";
   const text = document.createElement("span");
-  text.textContent = [
-    `${weaponAndAttributeText(weapon)}・${weapon.boost || "激化未設定"}`,
-    `今のスキル：${ownedSkillText(weapon) || "未登録"}`,
-    "今のボーナス：",
-  ].join("｜");
-  box.append(text, createOwnedBonusChips(weapon));
+  text.textContent = `${weaponAndAttributeText(weapon)}・${weapon.boost || "激化未設定"}`;
+  const skills = document.createElement("span");
+  skills.className = "owned-adopt-row";
+  const skillLabel = document.createElement("span");
+  skillLabel.className = "owned-adopt-label";
+  skillLabel.textContent = "今のスキル";
+  skills.append(skillLabel, createOwnedSummarySkills(weapon));
+  const bonuses = document.createElement("span");
+  bonuses.className = "owned-adopt-row";
+  const bonusLabel = document.createElement("span");
+  bonusLabel.className = "owned-adopt-label";
+  bonusLabel.textContent = "今のボーナス";
+  bonuses.append(bonusLabel, createOwnedBonusChips(weapon));
+  box.append(text, skills, bonuses);
   return box;
 }
 

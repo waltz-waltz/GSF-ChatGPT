@@ -166,6 +166,11 @@ details.owned-weapon-card > summary { display:grid; grid-template-columns:minmax
 .owned-summary-skills,.owned-summary-bonuses { display:inline-flex; flex-wrap:wrap; gap:5px; align-items:center; color:#cbc8b4; font-size:.78rem; }
 .owned-summary-skills .skill-tag { min-width:0; width:auto; padding:5px 8px; font-size:.8rem; white-space:normal; }
 .owned-skill-plus { color:#d6cba2; font-size:.9rem; font-weight:800; }
+.skill-adopt-detail-rich.owned-adopt-detail { flex-direction:column; align-items:stretch; min-width:0; gap:8px; padding:5px 0; overflow-wrap:anywhere; }
+.owned-adopt-row { display:flex; flex-wrap:wrap; align-items:center; gap:5px 10px; min-width:0; }
+.owned-adopt-label { color:#cbc8b4; font-size:.7rem; white-space:nowrap; }
+.owned-adopt-detail .owned-summary-skills { gap:6px; }
+.owned-adopt-detail .owned-summary-skills .skill-tag { padding:6px 10px; }
 .owned-summary-bonuses .bonus-tag { min-width:0; padding:4px 7px; font-size:.8rem; white-space:nowrap; }
 .owned-summary-rule { color:#cbc8b4; font-size:.76rem; line-height:1.6; }
 .owned-weapon-card > summary > .collapsible-hint { grid-column:1 / -1; grid-row:2; margin:0; }
