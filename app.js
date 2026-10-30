@@ -1377,7 +1377,10 @@ form.addEventListener("submit", (event) => {
 cancelButton.addEventListener("click", () => finishCancelled());
 
 tabButtons.forEach((button) => {
-  button.addEventListener("click", () => setActiveTab(button.dataset.tab));
+  button.addEventListener("click", () => {
+    setActiveTab(button.dataset.tab);
+    scrollToTabEntry(button.dataset.tab);
+  });
 });
 
 // 希望は武器種ごとに覚えているので、武器種を変えたらその武器種の希望を呼び出す
@@ -1860,7 +1863,40 @@ function createTargetId() {
   return `target-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+let tabEntryScrollRevision = 0;
+function scrollToTabEntry(tabName, preferResults = true) {
+  const revision = ++tabEntryScrollRevision;
+  requestAnimationFrame(() => {
+    const view = tabViews.find(view => view.dataset.tabView === tabName);
+    if (revision !== tabEntryScrollRevision || !view || view.hidden) return;
+    const selector = {'skill-future':'#skill-table-wrap','bonus-future':'#comparison-table-wrap','artian-future':'#artian-base-table-wrap'}[tabName];
+    const results = preferResults && selector ? view.querySelector(selector) : null;
+    const available = results && !results.hidden && results.querySelector('tbody tr');
+    const anchor = available ? results.previousElementSibling?.classList.contains('result-toolbar') ? results.previousElementSibling : results : view.querySelector('.panel') ?? view.firstElementChild;
+    if (!anchor) return;
+    const tabs = document.querySelector('.app-tabs');
+    const clearance = (tabs?.getBoundingClientRect().height ?? 0) + 16;
+    window.scrollTo({top:Math.max(0,window.scrollY + anchor.getBoundingClientRect().top - clearance),behavior:'instant'});
+  });
+}
+
+function setupTabEntryLinks() {
+  for (const tabName of ['skill-future','bonus-future','artian-future']) {
+    const view = tabViews.find(view=>view.dataset.tabView===tabName);
+    const selector = {'skill-future':'#skill-table-wrap','bonus-future':'#comparison-table-wrap','artian-future':'#artian-base-table-wrap'}[tabName];
+    const table = view?.querySelector(selector);
+    const bar = table?.previousElementSibling;
+    if (!bar?.classList.contains('result-toolbar')) continue;
+    const settings = document.createElement('button'); settings.type='button'; settings.className='text-button tab-entry-link'; settings.textContent='条件設定へ';
+    settings.addEventListener('click',()=>scrollToTabEntry(tabName,false));bar.insertBefore(settings,bar.querySelector('.result-export-status'));
+    const results = document.createElement('button'); results.type='button'; results.className='secondary small-button tab-entry-link'; results.textContent='結果一覧へ';
+    results.addEventListener('click',()=>scrollToTabEntry(tabName));
+    view.querySelector('.panel > .section-heading')?.after(results);
+  }
+}
+
 function setActiveTab(tabName, updateHash = true) {
+  const previousTab = tabViews.find(view => !view.hidden)?.dataset.tabView;
   const validTab = tabViews.some((view) => view.dataset.tabView === tabName)
     ? tabName
     : "search";
@@ -1878,6 +1914,7 @@ function setActiveTab(tabName, updateHash = true) {
   // 狙い（04）の希望が変わっていることがあるので、開くたびに書き直す
   if (validTab === "artian-owned") renderArtianOwnedTab();
   if (validTab === "artian-create") creationWorkbench?.refresh(true);
+  if (updateHash && previousTab !== validTab) scrollToTabEntry(validTab);
 }
 
 function syncRuntimeFromSaveState() {
@@ -5000,6 +5037,42 @@ function ownedSkillHolders(target, roll) {
     && weapon.groupIndex === roll.groupIndex);
 }
 
+// スキルは違っていても、同じ武器種・属性なら再付与の対象にできる。
+function skillReplacementCandidates(target, roll) {
+  return ownedWeapons.filter(weapon => weapon.weaponType === target.weaponType
+    && weapon.attributeForce === target.attributeForce
+    && (weapon.seriesIndex !== roll.seriesIndex || weapon.groupIndex !== roll.groupIndex));
+}
+
+function createSkillReplacementList(target, roll, completedRolls) {
+  const candidates = skillReplacementCandidates(target,roll);
+  if (!candidates.length) return null;
+  const origin = {seed:saveState.baseSeed,counter:saveState.skillCounter};
+  const section = document.createElement('section'); section.className='skill-replacement-list';
+  const heading=document.createElement('h4');heading.textContent='付け替えに使える手持ち';
+  const note=document.createElement('p');note.className='skill-coverage-note';note.textContent='同じ武器種・属性で、現在のスキルが違う武器です。選ぶと上書き内容を確認できます。';
+  const grid=document.createElement('div');grid.className='skill-replacement-grid';
+  for (const weapon of candidates) {
+    const card=document.createElement('div');card.className='skill-replacement-item';
+    const name=document.createElement('strong');appendSkillBoostLabel(name,weapon,weapon.boost,'手持ち：');
+    const label=ownedWeaponSummaryName(weapon);
+    if(label && label!==ownedWeaponAutoName(weapon)){const caption=document.createElement('span');caption.className='skill-replacement-name';caption.textContent=label;card.append(caption);}
+    card.prepend(name);
+    card.append(operationPreviewRow('今のスキル',createOwnedSummarySkills(weapon)),operationPreviewRow('今のボーナス',createOwnedBonusChips(weapon)));
+    const button=document.createElement('button');button.type='button';button.className='keep-transition-button';button.textContent='この武器に付け替える';
+    button.setAttribute('aria-label',skillBoostLabel(weapon,weapon.boost)+'のスキルを付け替える');
+    button.addEventListener('click',()=>{
+      const current=ownedWeapons.find(item=>item.id===weapon.id);
+      if(!current || saveState.baseSeed!==origin.seed || saveState.skillCounter!==origin.counter) {
+        void performConfirmedOperation(()=>{throw new Error('表示後に手持ち武器かカウンターが変わりました。最新の予測で選び直してください。');});return;
+      }
+      void adoptSkillToOwned(current,roll,completedRolls);
+    });
+    card.append(button);grid.append(card);
+  }
+  section.append(heading,note,grid);return section;
+}
+
 // 同じスキルの所持状況を激化別に判定する。激化不明の武器で全タイプを所持扱いにしない。
 function skillBoostOwnership(target, roll) {
   const holders = ownedSkillHolders(target, roll);
@@ -6865,7 +6938,15 @@ function createSkillPredictionRow(index, skillFilter, highlightEnabled) {
       name.append(...createWeaponBadge(target));
       summary.append(name, createSkillResultPair(roll, highlightEnabled));
       item.append(summary);
-      item.append(createSkillBoostCoverage(target, roll));
+      const coverage = createSkillBoostCoverage(target, roll);
+      let replacements = null;
+      if (skillFilter.enabled) {
+        replacements = createSkillReplacementList(target, roll, index + 1);
+      }
+      if (replacements) {
+        const options = document.createElement('div'); options.className='skill-match-options';
+        options.append(replacements,coverage);item.append(options);
+      } else item.append(coverage);
       item.append(createSkillAdoptButton(target, roll, index + 1));
       matches.append(item);
     }
@@ -8629,4 +8710,5 @@ setupResultToolbars([
   { table: artianBaseTableWrap.querySelector("table"), exportButton: exportArtianBaseCsvButton, filter: artianFilterEnabled },
   { table: predictionRows.closest("table"), filter: predictionMatchesOnly },
 ]);
+setupTabEntryLinks();
 document.querySelectorAll(".prediction-export-actions, .bonus-export-actions, .comparison-table-options, .skill-filter-actions").forEach((box) => { if (!box.children.length) box.remove(); });

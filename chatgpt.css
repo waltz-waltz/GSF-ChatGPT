@@ -140,6 +140,20 @@
 #skill-table-wrap.skill-results-focused .skill-match-summary .skill-result-pair { min-width:0; }
 #skill-table-wrap.skill-results-focused .skill-boost-coverage { min-width:0; margin:0; }
 #skill-table-wrap.skill-results-focused .skill-adopt { grid-column:1 / -1; margin:0; }
+#skill-table-wrap.skill-results-focused .skill-replacement-list { grid-column:1 / -1; min-width:0; margin:0; padding:14px; border:1px solid #4f9c94; border-radius:10px; background:#192c28; }
+.skill-match-options { display:flex; flex-direction:column; gap:14px; min-width:0; }
+.skill-replacement-list > h4 { margin:0 0 8px; color:#a5e9e0; font-size:.92rem; }
+.skill-replacement-list > p { margin:0 0 12px; line-height:1.6; }
+.skill-replacement-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr)); gap:12px; }
+.skill-replacement-item { display:flex; flex-direction:column; align-items:flex-start; gap:10px; min-width:0; padding:12px; border:1px solid #527c71; border-radius:8px; background:#202b22; overflow-wrap:anywhere; }
+.skill-replacement-item > strong { color:#b3e9e0; font-size:.84rem; }
+.skill-replacement-name { color:#d5d2ba; font-size:.78rem; }
+.skill-replacement-item .adopt-flow-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; min-width:0; }
+.skill-replacement-item .adopt-flow-label { min-width:6em; }
+.skill-replacement-item .comparison-bonus-set { grid-template-columns:repeat(5,auto); }
+.skill-replacement-item > button { margin-top:auto; }
+.result-toolbar .tab-entry-link { margin-left:auto; white-space:nowrap; }
+.panel > .tab-entry-link { margin:0 0 16px; }
 #skill-table-wrap.skill-results-focused .skill-owned-badge { max-width:100%; }
 #skill-table-wrap.skill-results-focused .skill-missing-candidate { font-size:.77rem; }
 #skill-table-wrap.skill-results-focused .saved-state-cell { padding-top:20px; }
